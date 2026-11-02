@@ -32,6 +32,54 @@ Future<void> mountItem(
 }
 
 void main() {
+  testWidgets('service toggle keeps its status color while busy', (
+    tester,
+  ) async {
+    var busy = false;
+    var enabled = true;
+    late StateSetter update;
+    await mountItem(
+      tester,
+      StatefulBuilder(
+        builder: (context, setState) {
+          update = setState;
+          return WispServiceItem(
+            title: 'Web',
+            kind: 'http',
+            enabled: enabled,
+            busy: busy,
+            onOpen: () => setState(() => busy = true),
+            onToggle: (_) {},
+          );
+        },
+      ),
+    );
+    PaintPattern thumbPaint(Color color) => paints
+      ..something(
+        (method, arguments) =>
+            method == #drawRRect &&
+            (arguments[1] as Paint).color.toARGB32() == color.toARGB32(),
+      );
+    final paint = find.descendant(
+      of: find.byType(Switch),
+      matching: find.byType(CustomPaint),
+    );
+    expect(paint, thumbPaint(const Color(0xff4596ff)));
+    await tester.tap(find.text('Web'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNull);
+    expect(paint, thumbPaint(const Color(0xff4596ff)));
+    update(() => busy = false);
+    await tester.pumpAndSettle();
+    expect(paint, thumbPaint(const Color(0xff4596ff)));
+    update(() => enabled = false);
+    await tester.pumpAndSettle();
+    expect(paint, thumbPaint(const Color(0xffff5252)));
+    update(() => busy = true);
+    await tester.pumpAndSettle();
+    expect(paint, thumbPaint(const Color(0xffff5252)));
+  });
+
   testWidgets('service identity stays left and settings follow the toggle', (
     tester,
   ) async {

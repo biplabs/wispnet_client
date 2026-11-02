@@ -127,8 +127,12 @@ class WispToggle extends StatelessWidget {
     ),
     child: Switch(
       value: value,
-      activeThumbColor: const Color(0xff4596ff),
-      inactiveThumbColor: const Color(0xffff5252),
+      // Being temporarily disabled while busy must not look like being off.
+      thumbColor: WidgetStateProperty.resolveWith(
+        (states) => states.contains(WidgetState.selected)
+            ? const Color(0xff4596ff)
+            : const Color(0xffff5252),
+      ),
       activeTrackColor: const Color(0xff29364a),
       inactiveTrackColor: const Color(0xff29364a),
       onChanged: onChanged,
