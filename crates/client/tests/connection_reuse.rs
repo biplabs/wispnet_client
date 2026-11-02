@@ -5,7 +5,7 @@ use std::{os::unix::fs::PermissionsExt, sync::Arc, time::Duration};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
-    sync::{Barrier, Notify},
+    sync::{Barrier, Notify, Semaphore},
     task::{JoinHandle, JoinSet},
 };
 use wispnet_agent::tunnel::{ActiveCounts, TunnelHost};
@@ -24,6 +24,7 @@ struct Fixture {
     backend: JoinHandle<()>,
     release_cancelled: Arc<Notify>,
     release_survivor: Arc<Notify>,
+    release_parallel: Arc<Semaphore>,
     incarnation: String,
 }
 
@@ -41,8 +42,10 @@ impl Fixture {
         let backend_address = listener.local_addr().unwrap();
         let release_cancelled = Arc::new(Notify::new());
         let release_survivor = Arc::new(Notify::new());
+        let release_parallel = Arc::new(Semaphore::new(0));
         let cancelled = release_cancelled.clone();
         let survivor = release_survivor.clone();
+        let parallel = release_parallel.clone();
         let backend = tokio::spawn(async move {
             let mut requests = JoinSet::new();
             loop {
@@ -52,6 +55,7 @@ impl Fixture {
                         let Ok((mut stream, _)) = accepted else { break };
                         let cancelled = cancelled.clone();
                         let survivor = survivor.clone();
+                        let parallel = parallel.clone();
                         requests.spawn(async move {
                             let Ok(head) = read_headers(&mut stream).await else { return };
                             if stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n").await.is_err() {
@@ -61,6 +65,9 @@ impl Fixture {
                                 cancelled.notified().await;
                             } else if head.starts_with(b"GET /survivor ") {
                                 survivor.notified().await;
+                            } else if head.starts_with(b"GET /parallel ") {
+                                let Ok(permit) = parallel.acquire().await else { return };
+                                permit.forget();
                             }
                             let _ = stream.write_all(b"done").await;
                         });
@@ -143,6 +150,7 @@ impl Fixture {
             backend,
             release_cancelled,
             release_survivor,
+            release_parallel,
             incarnation,
         }
     }
@@ -162,6 +170,8 @@ impl Fixture {
     }
 
     fn last_connection(&self) -> u64 {
+        // Only valid for identity comparisons while Control is the sole
+        // protocol. Per-peer telemetry can be overwritten by either connection.
         self.host.counts().peer_transport()[self.client.endpoint.id().to_string()]["connection"]
             ["connection_id"]
             .as_u64()
@@ -182,6 +192,7 @@ impl Fixture {
 
     async fn close(self) {
         self.client.command(&json!({"op":"stop"})).await.unwrap();
+        wait_counts(&self.host.counts(), 0, 0).await;
         self.client.endpoint.close().await;
         self.host.shutdown().await;
         self.backend.abort();
@@ -302,8 +313,6 @@ async fn concurrent_catalogs_and_http_requests_reuse_one_session_per_protocol() 
         let url = fixture.browser_url().await;
         assert!(response(&url, "/").await.ends_with("done"));
         wait_counts(&fixture.host.counts(), 2, 0).await;
-        let http_id = fixture.last_connection();
-        assert_ne!(http_id, control_id);
         let barrier = Arc::new(Barrier::new(9));
         let mut requests = JoinSet::new();
         for _ in 0..8 {
@@ -315,15 +324,19 @@ async fn concurrent_catalogs_and_http_requests_reuse_one_session_per_protocol() 
             });
         }
         barrier.wait().await;
+        // Hold the first wave open. Four live streams on exactly two peer
+        // connections prove the eight callers share the HTTP transport even
+        // while requests are active, rather than relying on sampled telemetry.
+        wait_counts(&fixture.host.counts(), 2, 4).await;
+        fixture.release_parallel.add_permits(8);
         while let Some(result) = requests.join_next().await {
             let reply = result.unwrap();
             assert!(reply.starts_with("HTTP/1.1 200"), "{reply}");
             assert!(reply.ends_with("done"));
         }
         wait_counts(&fixture.host.counts(), 2, 0).await;
-        assert_eq!(fixture.last_connection(), http_id);
         fixture.client.catalog(peer).await.unwrap();
-        assert_eq!(fixture.last_connection(), control_id);
+        wait_counts(&fixture.host.counts(), 2, 0).await;
         fixture.close().await;
     })
     .await
@@ -350,7 +363,6 @@ async fn cancelling_a_browser_stream_and_revoking_grants_preserve_session_isolat
                 .starts_with(b"HTTP/1.1 200")
         );
         wait_counts(&fixture.host.counts(), 2, 2).await;
-        let http_id = fixture.last_connection();
         drop(cancelled);
         fixture.release_cancelled.notify_one();
         wait_counts(&fixture.host.counts(), 2, 1).await;
@@ -359,7 +371,6 @@ async fn cancelling_a_browser_stream_and_revoking_grants_preserve_session_isolat
         survivor.read_to_end(&mut body).await.unwrap();
         assert_eq!(body, b"done");
         wait_counts(&fixture.host.counts(), 2, 0).await;
-        assert_eq!(fixture.last_connection(), http_id);
 
         let caller = fixture.client.endpoint.id();
         fixture
@@ -370,7 +381,7 @@ async fn cancelling_a_browser_stream_and_revoking_grants_preserve_session_isolat
             })
             .await;
         assert!(response(&url, "/revoked").await.starts_with("HTTP/1.1 403"));
-        assert_eq!(fixture.last_connection(), http_id);
+        wait_counts(&fixture.host.counts(), 2, 0).await;
         fixture
             .mutate(|revision| Mutation::GrantService {
                 expected_revision: revision,
@@ -379,7 +390,7 @@ async fn cancelling_a_browser_stream_and_revoking_grants_preserve_session_isolat
             })
             .await;
         assert!(response(&url, "/restored").await.ends_with("done"));
-        assert_eq!(fixture.last_connection(), http_id);
+        wait_counts(&fixture.host.counts(), 2, 0).await;
         fixture
             .mutate(|revision| Mutation::Revoke {
                 expected_revision: revision,
@@ -411,7 +422,7 @@ async fn network_stop_and_unpair_invalidate_reusable_sessions() {
         let peer = fixture.host.endpoint().id();
         let url = fixture.browser_url().await;
         assert!(response(&url, "/").await.ends_with("done"));
-        let first_http = fixture.last_connection();
+        wait_counts(&fixture.host.counts(), 2, 0).await;
         let mut interrupted = browser_request(&url, "/survivor").await;
         assert!(
             read_headers(&mut interrupted)
@@ -441,9 +452,8 @@ async fn network_stop_and_unpair_invalidate_reusable_sessions() {
         wait_counts(&fixture.host.counts(), 0, 0).await;
         fixture.client.catalog(peer).await.unwrap();
         assert!(response(&url, "/after-network").await.ends_with("done"));
-        assert_ne!(fixture.last_connection(), first_http);
+        wait_counts(&fixture.host.counts(), 2, 0).await;
 
-        let second_http = fixture.last_connection();
         fixture.client.command(&json!({"op":"stop"})).await.unwrap();
         wait_counts(&fixture.host.counts(), 0, 0).await;
         assert!(!fixture.client.gateway.is_enabled());
@@ -453,7 +463,6 @@ async fn network_stop_and_unpair_invalidate_reusable_sessions() {
             .await
             .unwrap();
         assert!(response(&url, "/after-stop").await.ends_with("done"));
-        assert_ne!(fixture.last_connection(), second_http);
         wait_counts(&fixture.host.counts(), 2, 0).await;
 
         fixture

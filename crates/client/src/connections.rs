@@ -233,7 +233,10 @@ mod tests {
 
     async fn peer() -> (Endpoint, JoinHandle<()>) {
         let endpoint = Endpoint::builder(presets::Minimal)
-            .alpns(vec![wispnet_core::host::ALPN.to_vec()])
+            .alpns(vec![
+                wispnet_core::host::ALPN.to_vec(),
+                wispnet_core::protocol::ALPN.to_vec(),
+            ])
             .bind_addr("127.0.0.1:0".parse::<std::net::SocketAddr>().unwrap())
             .unwrap()
             .bind()
@@ -347,6 +350,34 @@ mod tests {
         resume.send(()).unwrap();
         assert!(dial.await.is_err());
         assert!(pool.state.lock().unwrap().entries.is_empty());
+        worker.abort();
+        endpoint.close().await;
+        server.close().await;
+    }
+
+    #[tokio::test]
+    async fn protocols_use_distinct_live_sessions_without_aggregate_telemetry() {
+        let (server, worker) = peer().await;
+        let endpoint = Endpoint::bind(presets::Minimal).await.unwrap();
+        let pool = Pool::default();
+        let control = get(&pool, &endpoint, &server, 4, 2).await.unwrap();
+        let http = pool
+            .get(
+                &endpoint,
+                server.id(),
+                Protocol::Http,
+                4,
+                2,
+                std::future::ready(Ok(target(&server))),
+            )
+            .await
+            .unwrap();
+        assert_eq!(control.alpn(), wispnet_core::host::ALPN);
+        assert_eq!(http.alpn(), wispnet_core::protocol::ALPN);
+        assert_ne!(control.stable_id(), http.stable_id());
+        let again = get(&pool, &endpoint, &server, 4, 2).await.unwrap();
+        assert_eq!(control.stable_id(), again.stable_id());
+        drop(pool);
         worker.abort();
         endpoint.close().await;
         server.close().await;
