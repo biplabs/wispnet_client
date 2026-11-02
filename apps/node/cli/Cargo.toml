@@ -30,7 +30,7 @@ name = "wispnet"
 path = "src/main.rs"
 
 [dev-dependencies]
-irelay = { package = "iroh-relay", version = "=1.3.0", default-features = false, features = ["server"] }
+irelay = { package = "iroh-relay", version = "=1.4.1", default-features = false, features = ["server"] }
 rcgen = "=0.14.8"
 rustls = { version = "=0.23.46", default-features = false, features = ["ring", "std"] }
 rustls-pki-types = "=1.15.1"

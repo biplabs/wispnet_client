@@ -19,6 +19,8 @@ cargo fmt --all --check
 rustfmt --edition 2024 --check vendor/iroh/src/runtime.rs
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
+python3 scripts/test_iroh_vendor.py
+python3 scripts/test_iroh_compat.py
 cargo test -p wispnet-cli --example external_network_probe --locked
 cargo build --workspace --locked
 cargo build -p wispnet-cli --example relay_fixture --locked

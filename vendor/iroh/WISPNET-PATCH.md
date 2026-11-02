@@ -1,6 +1,6 @@
-# Iroh 1.3.0 compatibility patch
+# Iroh 1.4.1 compatibility patch
 
-Source: crates.io iroh 1.3.0, archive SHA-256 `885787b892b5e2507c701f132ecbd45d2bad4bbb75157a19427087c16dadb833`.
+Source: crates.io iroh 1.4.1, archive SHA-256 `e3689cab508af9bcef7816c1201b403595ec6aa20e7d15e1f9683bb4be4a5b17`.
 Upstream BSD-3-Clause license is preserved in LICENSE-BSD3.
 
 Local changes: src/net_report.rs, src/net_report/fallback.rs, src/socket.rs and
@@ -73,3 +73,24 @@ traffic. Congestion control, transport windows, packet batching and executor
 threading are unchanged. Workspace tests include the exact timer implementation
 from `crates/agent/src/lib.rs` because this vendored crate is excluded from the
 workspace; they cover deadlines, rearming, fallback and descriptor ownership.
+
+## Upgrade validation
+
+The patches were rebased from pristine Iroh 1.3.0 onto 1.4.1. The workspace
+updates Iroh/base/dns/relay together with Noq/proto/udp 1.4.0 and retains the
+workspace's rustls 0.23.46; rustls-webpki is updated to 0.103.16.
+
+`scripts/test_iroh_vendor.py` compiles the vendored crate's complete unit-test
+modules and runs the local fallback, path-selector, relay receive/queue and
+Linux timer regressions. Its checked-in Cargo.lock aligns Tokio and libc with
+the workspace. The relay transport's upstream fixture includes our additional
+relay-policy fields, preventing those unit tests from silently falling outside
+workspace validation.
+
+`scripts/test_iroh_compat.py` builds isolated fixtures against pristine Iroh and
+Noq 1.3.0 and the current vendored version. It checks pinned peer identities and
+two reliable streams in both mixed-version direct directions, then all eight
+old/new client, server and TLS relay combinations on loopback. Old dependencies
+exist only in ignored test fixtures and are not linked into Wispnet. Both helpers
+run from the required `scripts/test.sh` workflow. These tests establish local
+wire compatibility; WAN/mobile transition and throughput tests remain separate.
