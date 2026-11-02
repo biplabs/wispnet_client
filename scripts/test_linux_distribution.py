@@ -81,8 +81,10 @@ class DistributionTests(unittest.TestCase):
         manifest = json.loads((self.bundle / "manifest.json").read_text())
         self.assertEqual(manifest["license"], "Apache-2.0")
         for name in ["LICENSE", "NOTICE", "vendor/iroh/LICENSE-BSD3",
+                     "vendor/noq-proto/LICENSE-APACHE", "vendor/noq-proto/LICENSE-MIT",
                      "apps/flutter/assets/fonts/Roboto_LICENSE.txt"]:
             self.assertEqual((self.bundle / name).read_bytes(), (ROOT / name).read_bytes())
+            self.assertIn(name, manifest["sha256"])
         self.install()
         self.assertFalse(self.config.exists())
         self.assertFalse(self.state.exists())

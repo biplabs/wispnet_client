@@ -55,6 +55,7 @@ def package(binary, app, output):
         tree.mkdir()
         files = [
             "LICENSE", "NOTICE", "vendor/iroh/LICENSE-BSD3",
+            "vendor/noq-proto/LICENSE-APACHE", "vendor/noq-proto/LICENSE-MIT",
             "crates/shell/LICENSE", "crates/shell/NOTICE.md",
             "apps/flutter/assets/fonts/Roboto_LICENSE.txt",
             "scripts/install_macos.py", "scripts/node_request.py", "scripts/mcp_headers.py",

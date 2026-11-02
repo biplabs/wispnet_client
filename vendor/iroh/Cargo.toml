@@ -540,3 +540,7 @@ check-cfg = [
     "cfg(iroh_loom)",
     "cfg(skip_patchbay)",
 ]
+
+# Apply the same narrow upstream backport in standalone vendor unit tests.
+[patch.crates-io]
+noq-proto = { path = "../noq-proto" }

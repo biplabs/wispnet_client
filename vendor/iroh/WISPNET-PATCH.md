@@ -94,3 +94,8 @@ old/new client, server and TLS relay combinations on loopback. Old dependencies
 exist only in ignored test fixtures and are not linked into Wispnet. Both helpers
 run from the required `scripts/test.sh` workflow. These tests establish local
 wire compatibility; WAN/mobile transition and throughput tests remain separate.
+
+The workspace also applies a narrow upstream Noq-proto 1.4.0 backport for valid
+slow readers being rejected as excessive gaps. See `../noq-proto/WISPNET-PATCH.md`
+for immutable source/commit provenance, retained limits and removal criteria.
+The standalone Iroh test manifest uses the same Noq-proto override.

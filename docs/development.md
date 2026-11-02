@@ -46,6 +46,9 @@ The workspace pins Iroh 1.4.1 and uses the patched source in `vendor/iroh`.
 Rebase those changes onto a verified upstream crate when upgrading, update the
 Iroh/base/relay pins together, and update the Noq test pin with the transport.
 Keep a dependency upgrade separate from deliberate changes to relay policy.
+`vendor/noq-proto` carries the narrow merged upstream fix for valid slow-reader
+streams being rejected by Noq 1.4.0's chunk limit. Its patch inventory records
+the exact commit and removal condition; retain the gap limit and its tests.
 The normal suite also compiles all vendored library unit-test modules and runs
 the local patch/relay receive regressions using `scripts/test_iroh_vendor.py`.
 `scripts/test_iroh_compat.py` verifies authenticated multi-stream exchanges between

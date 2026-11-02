@@ -32,6 +32,14 @@ def main():
         filters.append("runtime::linux::tests")
     for test_filter in filters:
         subprocess.run(command + [test_filter], cwd=ROOT, env=env, check=True)
+    # Exercise both the upstream slow-reader regression and the malicious-gap
+    # cap retained by its narrow backport. This also compiles all proto unit tests.
+    subprocess.run(
+        ["cargo", "test", "--manifest-path", "vendor/noq-proto/Cargo.toml", "--locked",
+         "--lib", "--no-default-features", "--features", "rustls-ring",
+         "connection::assembler::test"],
+        cwd=ROOT, env=env, check=True,
+    )
 
 
 if __name__ == "__main__":

@@ -172,8 +172,10 @@ class MacDistributionTests(unittest.TestCase):
         self.assertEqual(manifest["platform"], "macos-x86_64")
         self.assertFalse(manifest["source_dirty"])
         for name in ["LICENSE", "NOTICE", "vendor/iroh/LICENSE-BSD3", "crates/shell/LICENSE",
+                     "vendor/noq-proto/LICENSE-APACHE", "vendor/noq-proto/LICENSE-MIT",
                      "crates/shell/NOTICE.md", "apps/flutter/assets/fonts/Roboto_LICENSE.txt"]:
             self.assertEqual((self.bundle / name).read_bytes(), (package_macos.ROOT / name).read_bytes())
+            self.assertIn(name, manifest["sha256"])
         for name, digest in manifest["sha256"].items():
             self.assertEqual(hashlib.sha256((self.bundle / name).read_bytes()).hexdigest(), digest)
         self.assertIn("Wispnet.app/Contents/Frameworks/Example.framework/Versions/Current", manifest["symlinks"])

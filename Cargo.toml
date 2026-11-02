@@ -1,7 +1,7 @@
 [workspace]
 members = ["crates/files", "crates/shell", "crates/core", "crates/agent", "crates/registry", "apps/node/cli", "apps/relay", "apps/public-gateway", "apps/flutter/android/native", "crates/client", "apps/node/daemon"]
 resolver = "3"
-exclude = ["vendor/iroh"]
+exclude = ["vendor/iroh", "vendor/noq-proto"]
 
 [workspace.package]
 license = "Apache-2.0"
@@ -29,3 +29,4 @@ libc = "=0.2.190"
 
 [patch.crates-io]
 iroh = { path = "vendor/iroh" }
+noq-proto = { path = "vendor/noq-proto" }

@@ -24,11 +24,15 @@ class ArchPackaging(unittest.TestCase):
                  'bin/lib/libflutter_linux_gtk.so','bin/wispnet_desktop/api.py',
                  'bin/data/flutter_assets/AssetManifest.bin','bin/icon.png',
                  'scripts/firewall_helper.py','scripts/install_firewall_helper.py','scripts/node_request.py',
-                 'LICENSE','NOTICE','vendor/iroh/LICENSE-BSD3','apps/flutter/assets/fonts/Roboto_LICENSE.txt']
+                 'LICENSE','NOTICE','vendor/iroh/LICENSE-BSD3',
+                 'vendor/noq-proto/LICENSE-APACHE','vendor/noq-proto/LICENSE-MIT',
+                 'apps/flutter/assets/fonts/Roboto_LICENSE.txt']
         for name in names:
             p=self.bundle/name; p.parent.mkdir(parents=True,exist_ok=True);p.write_text('test payload\n')
         (self.bundle/'LICENSE').write_bytes((ROOT/'LICENSE').read_bytes())
         (self.bundle/'NOTICE').write_bytes((ROOT/'NOTICE').read_bytes())
+        for name in ['vendor/noq-proto/LICENSE-APACHE', 'vendor/noq-proto/LICENSE-MIT']:
+            (self.bundle/name).write_bytes((ROOT/name).read_bytes())
         self.manifest = {'license':'Apache-2.0','platform':'linux-x86_64','desktop':'flutter','source_dirty':False,
                          'minimum_glibc':'2.39','sha256':{n:hashlib.sha256((self.bundle/n).read_bytes()).hexdigest() for n in names}}
         self.archive = self.root/'bundle.tar.gz'
@@ -63,6 +67,13 @@ class ArchPackaging(unittest.TestCase):
         self.assertIn('license = Apache-2.0',info)
         self.assertIn('usr/share/licenses/wispnet-bin/NOTICE',names)
         self.assertIn('usr/share/licenses/wispnet-bin/iroh-LICENSE-BSD3',names)
+        for license_name in ['LICENSE-APACHE', 'LICENSE-MIT']:
+            installed = 'usr/share/licenses/wispnet-bin/noq-proto-' + license_name
+            self.assertIn(installed, names)
+            self.assertEqual(
+                subprocess.check_output(['bsdtar', '-xOf', str(package), installed]),
+                (ROOT/'vendor/noq-proto'/license_name).read_bytes(),
+            )
         self.assertEqual((out/'LICENSE').read_bytes(), (ROOT/'LICENSE').read_bytes())
         self.assertIn(hashlib.sha256(self.archive.read_bytes()).hexdigest(),info)
         self.assertNotIn('SKIP',info)
@@ -88,6 +99,15 @@ class ArchPackaging(unittest.TestCase):
         self.pack()
         with self.assertRaisesRegex(ValueError, 'LICENSE does not match'):
             self.generate()
+
+    def test_rejects_missing_vendored_transport_licenses(self):
+        for name in ['vendor/noq-proto/LICENSE-APACHE', 'vendor/noq-proto/LICENSE-MIT']:
+            with self.subTest(name=name):
+                checksum = self.manifest['sha256'].pop(name)
+                self.pack()
+                with self.assertRaisesRegex(ValueError, 'Missing desktop release payload: ' + name):
+                    self.generate()
+                self.manifest['sha256'][name] = checksum
 
     def test_rejects_unpinned_urls_and_shell_injection(self):
         for changes in [dict(url='https://example.com/latest/binary.tar.gz'),dict(url='https://example.com/$(touch-x)'),

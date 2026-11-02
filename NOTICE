@@ -9,6 +9,9 @@ This license declaration does not relicense those components:
 
 - The vendored Iroh transport is distributed under its BSD 3-Clause license;
   see vendor/iroh/LICENSE-BSD3 and existing notices in vendor/iroh.
+- The vendored Noq-proto transport implementation retains its MIT OR Apache-2.0
+  license and upstream copyright notices; see vendor/noq-proto/LICENSE-MIT and
+  vendor/noq-proto/LICENSE-APACHE. Both files accompany desktop release bundles.
 - The bundled Roboto font retains its supplied license;
   see apps/flutter/assets/fonts/Roboto_LICENSE.txt.
 - The shell engine and native Android terminal include code adapted from

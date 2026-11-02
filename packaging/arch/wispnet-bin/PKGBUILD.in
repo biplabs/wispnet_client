@@ -41,6 +41,8 @@ package() {
     install -Dm644 "$srcdir/wispnet-remove.hook" "$pkgdir/usr/share/libalpm/hooks/wispnet-remove.hook"
     install -Dm644 "$srcdir/NOTICE" "$pkgdir/usr/share/licenses/$pkgname/NOTICE"
     install -Dm644 "$bundle/vendor/iroh/LICENSE-BSD3" "$pkgdir/usr/share/licenses/$pkgname/iroh-LICENSE-BSD3"
+    install -Dm644 "$bundle/vendor/noq-proto/LICENSE-APACHE" "$pkgdir/usr/share/licenses/$pkgname/noq-proto-LICENSE-APACHE"
+    install -Dm644 "$bundle/vendor/noq-proto/LICENSE-MIT" "$pkgdir/usr/share/licenses/$pkgname/noq-proto-LICENSE-MIT"
     install -Dm644 "$bundle/apps/flutter/assets/fonts/Roboto_LICENSE.txt" "$pkgdir/usr/share/licenses/$pkgname/Roboto_LICENSE.txt"
     install -Dm644 "$srcdir/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

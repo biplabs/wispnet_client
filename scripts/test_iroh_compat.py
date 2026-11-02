@@ -60,6 +60,11 @@ rustls-webpki = "=0.103.16"
 [profile.dev]
 debug = 0
 '''
+    if not old:
+        manifest += (
+            '\n[patch.crates-io]\nnoq-proto = { path = '
+            + json.dumps(str(ROOT / "vendor/noq-proto")) + ' }\n'
+        )
     write_changed(project / "Cargo.toml", manifest)
     write_changed(project / "src/main.rs", SOURCE.read_text())
     if not (project / "Cargo.lock").exists():

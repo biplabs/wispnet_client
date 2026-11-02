@@ -49,6 +49,7 @@ def prepare(archive, output, version, url, license_id="Apache-2.0", license_file
                      'bin/lib/libflutter_linux_gtk.so', 'bin/wispnet_desktop/api.py',
                      'bin/data/flutter_assets/AssetManifest.bin',
                      'LICENSE', 'NOTICE', 'vendor/iroh/LICENSE-BSD3',
+                     'vendor/noq-proto/LICENSE-APACHE', 'vendor/noq-proto/LICENSE-MIT',
                      'apps/flutter/assets/fonts/Roboto_LICENSE.txt',
                      'scripts/firewall_helper.py', 'scripts/install_firewall_helper.py', 'scripts/node_request.py']:
             if name not in manifest['sha256']:

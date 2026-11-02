@@ -354,12 +354,16 @@ async fn slow_reader_applies_backpressure_and_cancellation_releases_backend() {
     const RESPONSE_BYTES: usize = 256 * 1024 * 1024;
     let written = Arc::new(AtomicUsize::new(0));
     let written_inner = written.clone();
+    let write_error = Arc::new(Mutex::new(None));
+    let backend_error = write_error.clone();
     let backend = backend(move |mut socket| {
         let written = written_inner.clone();
+        let write_error = backend_error.clone();
         async move {
             let chunk = [7u8; 16384];
             for _ in 0..RESPONSE_BYTES / chunk.len() {
-                if socket.write_all(&chunk).await.is_err() {
+                if let Err(error) = socket.write_all(&chunk).await {
+                    *write_error.lock().unwrap() = Some(error.to_string());
                     break;
                 }
                 written.fetch_add(chunk.len(), Ordering::SeqCst);
@@ -390,7 +394,8 @@ async fn slow_reader_applies_backpressure_and_cancellation_releases_backend() {
             );
             assert!(
                 backend.live.load(Ordering::SeqCst) > 0,
-                "backend writer exited before backpressure was observed"
+                "backend writer exited after {current} bytes before backpressure was observed: {:?}; connection: {:?}",
+                write_error.lock().unwrap(), connection.close_reason()
             );
             if current != previous {
                 previous = current;
