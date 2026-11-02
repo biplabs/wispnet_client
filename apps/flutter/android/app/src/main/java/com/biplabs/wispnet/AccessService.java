@@ -62,7 +62,7 @@ public final class AccessService extends Service {
   Intent stop=new Intent(this,AccessService.class).setAction("stop");
   PendingIntent pending=PendingIntent.getService(this,2,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent open=PendingIntent.getActivity(this,1,getPackageManager().getLaunchIntentForPackage(getPackageName()),PendingIntent.FLAG_IMMUTABLE);
-  return new Notification.Builder(this,"access").setSmallIcon(R.drawable.ic_stat_wispnet).setContentTitle(title).setContentText("Paired services and permitted file transfers are available").setContentIntent(open).addAction(new Notification.Action.Builder(null,"Go offline",pending).build()).setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false).setCategory(Notification.CATEGORY_SERVICE).setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE).build();
+  return new Notification.Builder(this,"access").setSmallIcon(R.drawable.ic_stat_wispnet).setContentTitle(title).setContentText("There’s no them. There’s only us.").setContentIntent(open).addAction(new Notification.Action.Builder(null,"Go offline",pending).build()).setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false).setCategory(Notification.CATEGORY_SERVICE).setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE).build();
  }
  // Call while holding networkLock. Drain every generation, including a callback
  // arriving during native recovery; coalescing must never lose the final network.
