@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -132,6 +133,37 @@ class ShareBackend implements WispnetBackend {
       default:
         throw StateError('Unexpected method $method');
     }
+  }
+}
+
+class LongShareBackend extends ShareBackend {
+  final startReply = Completer<Map<String, dynamic>>();
+  final lastFolder = 'f' * 40;
+
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method, [
+    Map<String, dynamic> arguments = const {},
+  ]) async {
+    if (method == 'shareList') {
+      calls.add((method, Map.of(arguments)));
+      return {
+        'entries': [
+          for (var index = 0; index < 24; index++)
+            {
+              'name': index == 23 ? lastFolder : 'checkpoint-$index',
+              'path': index == 23 ? lastFolder : 'checkpoint-$index',
+              'is_dir': true,
+              'size_bytes': 0,
+            },
+        ],
+      };
+    }
+    if (method == 'shareGet') {
+      calls.add((method, Map.of(arguments)));
+      return startReply.future;
+    }
+    return super.invoke(method, arguments);
   }
 }
 
@@ -464,6 +496,241 @@ void main() {
         downloads.dispose();
         await tester.pumpWidget(const SizedBox());
       }
+    },
+  );
+
+  for (final desktop in [true, false]) {
+    testWidgets(
+      '${desktop ? 'desktop' : 'Android'} reveals a download immediately after picking its destination in a long share',
+      (tester) async {
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = desktop
+            ? const Size(960, 900)
+            : const Size(360, 780);
+        final backend = LongShareBackend()
+          ..selectedFolder = desktop ? '/chosen' : 'content://downloads/tree'
+          ..status = {
+            'transfer': 'c' * 64,
+            'state': 'running',
+            'phase': 'preparing',
+            'verified_bytes': 0,
+            'size_bytes': 0,
+            'files_complete': 0,
+            'files_total': 0,
+          };
+        final downloads = SharedFileDownloads(backend);
+        addTearDown(downloads.dispose);
+        final label = desktop ? 'desktop' : 'phone';
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: const ValueKey('share-preview'),
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: wispTheme(),
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => showWispSheet<void>(
+                      context,
+                      title: 'checkpoints on Training host',
+                      child: SharedFilesBrowser(
+                        backend: backend,
+                        machine: machine,
+                        service: service,
+                        downloads: downloads,
+                        desktop: desktop,
+                      ),
+                    ),
+                    child: const Text('Browse share'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('Browse share'));
+        await tester.pumpAndSettle();
+        final download = find.byTooltip(
+          'Download folder ${backend.lastFolder}',
+        );
+        // Simulate selecting a folder far below the initial viewport. After
+        // the picker returns, the user must not need to find the progress card.
+        await tester.ensureVisible(download);
+        await tester.pump();
+        await tester.tap(download);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(backend.startReply.isCompleted, isFalse);
+        expect(downloads.jobs, hasLength(1));
+        expect(
+          find.textContaining('Starting download').hitTestable(),
+          findsOneWidget,
+        );
+        expect(
+          find.byType(LinearProgressIndicator).hitTestable(),
+          findsOneWidget,
+        );
+        expect(
+          backend.calls.where((call) => call.$1 == 'shareGet'),
+          hasLength(1),
+        );
+        await captureShare(tester, '$label-download-starting');
+
+        backend.startReply.complete(Map.of(backend.status));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(
+          find.textContaining('Preparing folder').hitTestable(),
+          findsOneWidget,
+        );
+        expect(find.textContaining('0 B / 0 B'), findsNothing);
+        expect(find.text('0 / 0 files'), findsNothing);
+        expect(find.text('Cancel download').hitTestable(), findsOneWidget);
+        await captureShare(tester, '$label-download-preparing');
+
+        backend.status = {
+          ...backend.status,
+          'phase': 'transferring',
+          'verified_bytes': 512,
+          'size_bytes': 1024,
+          'files_complete': 1,
+          'files_total': 2,
+        };
+        await downloads.poll();
+        await tester.pump();
+        expect(find.text('1 / 2 files').hitTestable(), findsOneWidget);
+        final indicator = tester.widget<LinearProgressIndicator>(
+          find.byType(LinearProgressIndicator),
+        );
+        expect(indicator.value, .5);
+        await tester.tap(find.byTooltip('Close'));
+        await tester.pumpAndSettle();
+        expect(downloads.jobs.single.finished, isFalse);
+        expect(backend.calls.where((call) => call.$1 == 'fileCancel'), isEmpty);
+
+        // Reopening the share exposes both the ongoing task and a subsequent
+        // failure without scrolling to the end of its file listing.
+        await tester.tap(find.text('Browse share'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        backend.status = {
+          ...backend.status,
+          'state': 'failed',
+          'error': {
+            'code': 'PERMISSION_DENIED',
+            'message': 'Reader permission was revoked.',
+          },
+        };
+        await downloads.poll();
+        await tester.pump();
+        expect(
+          find.text('Reader permission was revoked.').hitTestable(),
+          findsOneWidget,
+        );
+        expect(find.text('Resume download').hitTestable(), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets(
+    'a short window reveals a header-started download below the initial viewport',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(360, 440);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final backend = LongShareBackend();
+      final downloads = SharedFileDownloads(backend);
+      addTearDown(downloads.dispose);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: wispTheme(),
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () => showWispSheet<void>(
+                  context,
+                  title: 'checkpoints on Training host',
+                  child: SharedFilesBrowser(
+                    backend: backend,
+                    machine: machine,
+                    service: service,
+                    downloads: downloads,
+                    desktop: true,
+                  ),
+                ),
+                child: const Text('Browse share'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.text('Browse share'));
+      await tester.pumpAndSettle();
+      final scroll = tester.state<ScrollableState>(find.byType(Scrollable));
+      expect(scroll.position.pixels, 0);
+      // No manual scrolling: a newly inserted card below the toolbar must be
+      // revealed even though the user was already at the top of this share.
+      await tester.tap(find.byTooltip('Download this folder'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(backend.startReply.isCompleted, isFalse);
+      expect(downloads.jobs.single.request['path'], '');
+      expect(
+        find.textContaining('Starting download').hitTestable(),
+        findsOneWidget,
+      );
+      expect(
+        find.byType(LinearProgressIndicator).hitTestable(),
+        findsOneWidget,
+      );
+      backend.startReply.complete({...backend.status, 'state': 'complete'});
+      await tester.pump();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'a failed start stays visible after revealing the pending download',
+    (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(360, 780);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final backend = LongShareBackend();
+      final downloads = SharedFileDownloads(backend);
+      addTearDown(downloads.dispose);
+      await browser(tester, backend, downloads);
+      final download = find.byTooltip('Download folder ${backend.lastFolder}');
+      await tester.ensureVisible(download);
+      await tester.pump();
+      await tester.tap(download);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        find.textContaining('Starting download').hitTestable(),
+        findsOneWidget,
+      );
+      backend.startReply.completeError(
+        const FormatException('UNAVAILABLE: The local device stopped.'),
+      );
+      await tester.pump();
+      expect(
+        find.textContaining('The local device stopped.').hitTestable(),
+        findsOneWidget,
+      );
+      expect(find.text('Resume download').hitTestable(), findsOneWidget);
+      expect(downloads.jobs.single.status['state'], 'failed');
+      expect(
+        backend.calls.where((call) => call.$1 == 'shareGet'),
+        hasLength(1),
+      );
+      await tester.pumpWidget(const SizedBox());
     },
   );
 

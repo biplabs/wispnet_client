@@ -202,6 +202,7 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
   List<Map<String, dynamic>> entries = [];
   bool loading = false, choosing = false;
   int generation = 0;
+  final _downloadKeys = <SharedFileDownload, GlobalKey>{};
   Map<String, dynamic> get target => {
     'host': widget.machine.id,
     'service': widget.service['id'],
@@ -282,7 +283,17 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
           'resume': true,
         },
       );
-      await widget.downloads.start(job);
+      final started = widget.downloads.start(job);
+      // Queue feedback before waiting for the native job handle. A folder can
+      // spend time preparing, and the selected row may be far down the list.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !wispPageIsCurrent(context)) return;
+        final progressContext = _downloadKeys[job]?.currentContext;
+        if (progressContext != null) {
+          unawaited(Scrollable.ensureVisible(progressContext));
+        }
+      });
+      await started;
     } catch (error) {
       if (mounted) setState(() => failure = _shareFailure(error));
     } finally {
@@ -291,7 +302,11 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
   }
 
   Widget downloadRow(SharedFileDownload job) {
-    return SharedDownloadTile(downloads: widget.downloads, job: job);
+    return SharedDownloadTile(
+      key: _downloadKeys.putIfAbsent(job, GlobalKey.new),
+      downloads: widget.downloads,
+      job: job,
+    );
   }
 
   @override
@@ -349,6 +364,25 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
         if (loading) const LinearProgressIndicator(),
         if (failure != null)
           Text(failure!, style: const TextStyle(color: WispColors.error)),
+        if (widget.downloads.jobs.any(
+          (job) =>
+              job.request['host'] == widget.machine.id &&
+              job.request['service'] == widget.service['id'],
+        )) ...[
+          const SizedBox(height: 16),
+          const Text(
+            'Downloads',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const Text('Downloads continue when this browser closes.'),
+          for (final job in widget.downloads.jobs.reversed.where(
+            (job) =>
+                job.request['host'] == widget.machine.id &&
+                job.request['service'] == widget.service['id'],
+          ))
+            downloadRow(job),
+          const SizedBox(height: 16),
+        ],
         if (!loading && entries.isEmpty && failure == null)
           const Padding(
             padding: EdgeInsets.all(16),
@@ -385,24 +419,6 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
             onPressed: loading ? null : () => load(path, more: true),
             child: const Text('Load more files'),
           ),
-        if (widget.downloads.jobs.any(
-          (job) =>
-              job.request['host'] == widget.machine.id &&
-              job.request['service'] == widget.service['id'],
-        )) ...[
-          const SizedBox(height: 16),
-          const Text(
-            'Downloads',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          const Text('Downloads continue when this browser closes.'),
-          for (final job in widget.downloads.jobs.where(
-            (job) =>
-                job.request['host'] == widget.machine.id &&
-                job.request['service'] == widget.service['id'],
-          ))
-            downloadRow(job),
-        ],
       ],
     ),
   );
@@ -446,6 +462,18 @@ class SharedDownloadTile extends StatelessWidget {
     final changed = error is Map && error['code'] == 'STALE_VERSION';
     final problem =
         job.failure ?? (error is Map ? error['message'] as String? : null);
+    final label = switch (state) {
+      'starting' => 'Starting download…',
+      'failed' => 'Download failed',
+      'cancelled' => 'Download paused',
+      _ => switch (job.status['phase']) {
+        'queued' => 'Download queued',
+        'preparing' => folder ? 'Preparing folder…' : 'Preparing download…',
+        'verifying' => 'Verifying download…',
+        'saving' => 'Saving download…',
+        _ => 'Downloading',
+      },
+    };
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: WispPanel(
@@ -456,9 +484,13 @@ class SharedDownloadTile extends StatelessWidget {
             Text(
               state == 'complete'
                   ? 'Downloaded · ${fileSize(size)}'
-                  : '${job.status['phase'] ?? state} · ${fileSize(verified)} / ${fileSize(size)}',
+                  : size > 0
+                  ? '$label · ${fileSize(verified)} / ${fileSize(size)}'
+                  : label,
             ),
-            if (folder && filesTotal != null)
+            if (folder &&
+                filesTotal != null &&
+                (filesTotal > 0 || state == 'complete'))
               Text('$filesComplete / $filesTotal files'),
             if (!job.finished)
               LinearProgressIndicator(
