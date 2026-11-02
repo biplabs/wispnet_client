@@ -157,9 +157,13 @@ The owner may use one UI to add or revoke a phone across several hosts, but each
 
 ## How known peers find each other
 
-Each device saves its trusted peers' identities and relay bootstrap information. v1 explicitly configures one relay: **`relay.wispnet.app`**. Its temporary deployment runs on `desktop.home` as a separate service from the node role; see [desktop relay setup](docs/desktop-relay.md).
+Each device saves its trusted peers' identities and relay bootstrap information.
+The explicitly configured primary relay is **`relay.wispnet.app`**.
 
-The relay uses automatic public TLS certificates. Native tablet access through a cellular hotspot has been verified; see [external-network validation](docs/external-relay-validation.md).
+The current relay infrastructure runs on `pi3.home`, with Caddy providing automatic
+public TLS certificates. The desktop node remains a separate role. See the
+[relay deployment and upgrade guide](docs/desktop-relay.md). Native tablet access
+through a cellular hotspot has been verified; see [external-network validation](docs/external-relay-validation.md).
 
 ```text
 Expected peer:  <target host's public EndpointId>

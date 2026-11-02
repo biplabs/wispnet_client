@@ -1,6 +1,29 @@
-# Temporary desktop relay, independent of the node role
+# Relay deployment and historical desktop recipe
 
-`desktop.home` temporarily hosts the standalone `wispnet-relay` binary. It is a
+## Current deployment and upgrades
+
+The live infrastructure runs on `pi3.home` (ARM64), independently of the desktop
+and laptop node roles. Caddy terminates public TLS on TCP 443/8443 and forwards
+packet-relay traffic to `127.0.0.1:18443`. The packet relay also provides QUIC
+address discovery on UDP 7842; the public application gateway listens separately
+on loopback TCP 18080. Relay TLS and gateway identity/configuration stay on the Pi.
+
+For a software upgrade, build ARM64 release executables from the tested locked
+source. Verify their architecture, hashes and startup options before atomically
+replacing the installed executables, retaining the previous binaries for rollback.
+Preserve all configuration, certificates, gateway identity, and node state.
+Restart `wispnet-relay.service` first and verify HTTPS, authenticated address
+discovery, and a disposable relay-only peer exchange. Upgrade the public gateway
+separately under its existing identity and verify publisher reconnection. Caddy
+and the certificate watcher do not need restarting for either binary update.
+
+The following desktop setup is a historical recipe. Do not run its installer
+against the current Caddy-fronted Pi deployment: it rewrites the listener/TLS
+configuration for the older topology.
+
+## Historical desktop setup
+
+`desktop.home` previously hosted the standalone `wispnet-relay` binary. It is a
 separate process/systemd unit, not the desktop node's registry or transport
 endpoint. The pinned Iroh 1.4.1 server authenticates relay clients and forwards
 end-to-end encrypted packets. Relay admission never approves an application

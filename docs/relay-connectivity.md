@@ -17,8 +17,8 @@ max_streams = 64
 max_streams_per_connection = 8
 ```
 
-The current temporary relay runs on desktop as a separate service; see the
-[deployment and TLS instructions](desktop-relay.md). Use your operated relay. Normal mode permits direct UDP/NAT paths
+The current relay runs on `pi3.home` behind Caddy, separately from the desktop
+node; see the [deployment and TLS instructions](desktop-relay.md). Use your operated relay. Normal mode permits direct UDP/NAT paths
 and relay fallback. Choose a reachable bind address for direct connectivity.
 `relay_only = true` removes all peer UDP transports, useful for restrictive
 networks and testing. Relay TCP/TLS still needs network access. The config bind

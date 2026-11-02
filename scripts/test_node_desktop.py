@@ -338,11 +338,18 @@ class NodeIntegration(unittest.TestCase):
                     held.join(timeout=10)
                 self.assertEqual(responses[0][2], b"node-gateway-ok")
                 deadline = time.monotonic() + 8
+                while bapi.request(op="status")["transport_streams"]:
+                    self.assertLess(time.monotonic(), deadline)
+                    time.sleep(0.05)
+                # Completed operations release their streams, while reusable
+                # authenticated sessions remain connected until Stop or idle expiry.
+                self.assertIn(pa, bapi.request(op="status")["connected_peers"])
+                self.assertEqual(len(bapi.request(op="status")["host"]["clients"]), 1)
+                api.request(op="stop")
+                deadline = time.monotonic() + 8
                 while bapi.request(op="status")["connected_peers"]:
                     self.assertLess(time.monotonic(), deadline)
                     time.sleep(0.05)
-                self.assertEqual(len(bapi.request(op="status")["host"]["clients"]), 1)
-                api.request(op="stop")
                 self.assertFalse(api.request(op="access_status")["enabled"])
                 with self.assertRaises(OSError):
                     socket.create_connection(("127.0.0.1", parsed.port), timeout=1)
@@ -410,7 +417,9 @@ class NodeIntegration(unittest.TestCase):
                 self.assertEqual(
                     headers["Access-Control-Allow-Origin"], "https://unlisted.example"
                 )
-                self.assertEqual(api.request(op="status")["connected_peers"], {})
+                # The other host's idle control session may still be connected.
+                # Owner-local browsing must not create a self-connection.
+                self.assertNotIn(pa, api.request(op="status")["connected_peers"])
                 self.assertEqual(api.request(op="status")["host"]["clients"][0]["peer"], pb)
                 self.assertNotIn(pa, api.request(op="status")["peer_pins"])
                 # Removing the binding interrupts an active local response and
@@ -501,8 +510,8 @@ class NodeIntegration(unittest.TestCase):
                 api.request(op="stop")
                 with self.assertRaises(OSError):
                     socket.create_connection(("127.0.0.1", parsed.port), timeout=1)
-                # Successful requests retain recent activity after short connections
-                # close, without emitting background network traffic.
+                # Successful requests retain recent activity after Stop closes
+                # reusable sessions, without emitting background network traffic.
                 status = bapi.request(op="status")
                 self.assertEqual(status["presence_timeout_seconds"], 60)
                 self.assertEqual(status["connected_peers"], {})
