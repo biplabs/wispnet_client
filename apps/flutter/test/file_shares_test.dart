@@ -167,6 +167,58 @@ class LongShareBackend extends ShareBackend {
   }
 }
 
+class DelayedStatusShareBackend extends ShareBackend {
+  final statusReply = Completer<Map<String, dynamic>>();
+  final cancelReply = Completer<Map<String, dynamic>>();
+  bool holdStatus = false;
+  bool holdCancel = false;
+
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method, [
+    Map<String, dynamic> arguments = const {},
+  ]) async {
+    if (method == 'fileStatus' && holdStatus) {
+      calls.add((method, Map.of(arguments)));
+      return statusReply.future;
+    }
+    if (method == 'fileCancel' && holdCancel) {
+      calls.add((method, Map.of(arguments)));
+      return cancelReply.future;
+    }
+    return super.invoke(method, arguments);
+  }
+}
+
+Map<String, dynamic> downloadRequest() => {
+  'host': host,
+  'service': 'checkpoints',
+  'incarnation': incarnation,
+  'path': 'run-1',
+  'local_path': '/chosen/run-1',
+  'name': 'run-1',
+  'recursive': true,
+};
+
+Map<String, dynamic> downloadStatus({
+  required int verified,
+  int? downloaded,
+  int total = 10000,
+  String phase = 'transferring',
+  String state = 'running',
+  String? transfer,
+  int filesComplete = 0,
+}) => {
+  'transfer': transfer ?? 'c' * 64,
+  'state': state,
+  'phase': phase,
+  'verified_bytes': verified,
+  'downloaded_bytes': ?downloaded,
+  'size_bytes': total,
+  'files_complete': filesComplete,
+  'files_total': 10,
+};
+
 Future<void> browser(
   WidgetTester tester,
   ShareBackend backend,
@@ -221,6 +273,506 @@ void main() {
   test('read-only shares can open without an inbox service', () {
     expect(machine.canOpen(service), isTrue);
     expect(machine.canOpen({...service, 'enabled': false}), isFalse);
+  });
+
+  test('download speed measures fresh payload and expires during a stall', () {
+    var elapsed = const Duration(days: 1);
+    final job = SharedFileDownload(
+      request: downloadRequest(),
+      name: 'run-1',
+      elapsed: () => elapsed,
+    );
+    job.updateStatus(downloadStatus(verified: 4000, downloaded: 0));
+    expect(
+      job.bytesPerSecond,
+      isNull,
+      reason: 'A resumed prefix is a baseline, not newly downloaded data.',
+    );
+    expect(job.estimatedRemaining, isNull);
+    elapsed += const Duration(seconds: 2);
+    job.updateStatus(downloadStatus(verified: 5000, downloaded: 1000));
+    expect(job.bytesPerSecond, 500);
+    expect(job.estimatedRemaining, const Duration(seconds: 10));
+    // A completed/skipped child can make verified progress jump without
+    // carrying that many new bytes over the network.
+    elapsed += const Duration(seconds: 2);
+    job.updateStatus(
+      downloadStatus(verified: 9000, downloaded: 2000, filesComplete: 4),
+    );
+    expect(job.bytesPerSecond, 500);
+    expect(job.estimatedRemaining, const Duration(seconds: 2));
+    job.updateStatus(
+      downloadStatus(verified: 9000, downloaded: 2000, filesComplete: 4),
+    );
+    expect(
+      job.bytesPerSecond,
+      500,
+      reason: 'Repeated observations at the same time cannot divide by zero.',
+    );
+    elapsed += const Duration(seconds: 1);
+    job.updateStatus(
+      downloadStatus(verified: 9000, downloaded: 2000, filesComplete: 4),
+    );
+    expect(
+      job.bytesPerSecond,
+      400,
+      reason:
+          'An unchanged poll smooths chunk bursts instead of flashing zero.',
+    );
+    expect(job.estimatedRemaining, isNotNull);
+    elapsed += const Duration(seconds: 1);
+    job.updateStatus(
+      downloadStatus(verified: 9500, downloaded: 2500, filesComplete: 4),
+    );
+    expect(job.bytesPerSecond, closeTo(2500 / 6, .001));
+    elapsed += const Duration(seconds: 3);
+    expect(
+      job.bytesPerSecond,
+      0,
+      reason: 'An unanswered native poll must expire the old moving rate.',
+    );
+    expect(job.estimatedRemaining, isNull);
+  });
+
+  test(
+    'download estimates reset across phases, handles and counter rollback',
+    () {
+      var elapsed = Duration.zero;
+      var bytes = 1000;
+      final job = SharedFileDownload(
+        request: downloadRequest(),
+        name: 'run-1',
+        elapsed: () => elapsed,
+      );
+      void report({String phase = 'transferring', String state = 'running'}) {
+        elapsed += const Duration(seconds: 1);
+        job.updateStatus(
+          downloadStatus(
+            verified: bytes,
+            downloaded: bytes,
+            total: 100000,
+            phase: phase,
+            state: state,
+          ),
+        );
+      }
+
+      report();
+      for (final phase in ['preparing', 'queued', 'verifying', 'saving']) {
+        bytes += 1000;
+        report();
+        expect(job.bytesPerSecond, 1000);
+        report(phase: phase);
+        expect(job.bytesPerSecond, isNull, reason: phase);
+        expect(job.estimatedRemaining, isNull, reason: phase);
+        bytes += 10000;
+        report();
+        expect(
+          job.bytesPerSecond,
+          isNull,
+          reason: 'Preparation and restored prefixes need a new baseline.',
+        );
+      }
+      for (final state in ['cancelled', 'failed', 'complete']) {
+        bytes += 1000;
+        report();
+        expect(job.bytesPerSecond, 1000);
+        report(state: state);
+        expect(job.bytesPerSecond, isNull, reason: state);
+        expect(job.estimatedRemaining, isNull, reason: state);
+        report();
+        expect(job.bytesPerSecond, isNull);
+      }
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(downloadStatus(verified: 2000, downloaded: 0));
+      expect(
+        job.bytesPerSecond,
+        isNull,
+        reason: 'Counter rollback cannot become a negative rate.',
+      );
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(downloadStatus(verified: 3000, downloaded: 1000));
+      expect(job.bytesPerSecond, 1000);
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(
+        downloadStatus(verified: 8000, downloaded: 6000, transfer: 'd' * 64),
+      );
+      expect(
+        job.bytesPerSecond,
+        isNull,
+        reason: 'A new native handle starts a new attempt.',
+      );
+      elapsed -= const Duration(seconds: 5);
+      job.updateStatus(
+        downloadStatus(verified: 9000, downloaded: 7000, transfer: 'd' * 64),
+      );
+      expect(
+        job.bytesPerSecond,
+        isNull,
+        reason: 'A clock discontinuity cannot produce an invalid speed.',
+      );
+    },
+  );
+
+  testWidgets(
+    'legacy folder work counters cannot masquerade as network speed',
+    (tester) async {
+      var elapsed = Duration.zero;
+      final downloads = SharedFileDownloads(ShareBackend());
+      final job = SharedFileDownload(
+        request: downloadRequest(),
+        name: 'run-1',
+        elapsed: () => elapsed,
+      );
+      // The same completed-file count can describe the end of one child and
+      // a retained prefix in the next. No fresh bytes need cross the network.
+      job.updateStatus(downloadStatus(verified: 1000, filesComplete: 1));
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(downloadStatus(verified: 9000, filesComplete: 1));
+      expect(job.canMeasureSpeed, isFalse);
+      expect(job.bytesPerSecond, isNull);
+      expect(job.estimatedRemaining, isNull);
+      downloads.jobs.add(job);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: wispTheme(),
+          home: Scaffold(body: SharedDownloadsList(downloads: downloads)),
+        ),
+      );
+      expect(find.text('Download speed unavailable'), findsOneWidget);
+      expect(find.text('Measuring download speed…'), findsNothing);
+      expect(find.textContaining('remaining'), findsNothing);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      downloads.dispose();
+    },
+  );
+
+  test(
+    'legacy single-file progress keeps a useful rate without unknown ETAs',
+    () {
+      var elapsed = Duration.zero;
+      final job = SharedFileDownload(
+        request: {...downloadRequest(), 'recursive': false},
+        name: 'model.bin',
+        elapsed: () => elapsed,
+      );
+      job.updateStatus(downloadStatus(verified: 1000));
+      expect(job.canMeasureSpeed, isTrue);
+      expect(job.bytesPerSecond, isNull);
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(downloadStatus(verified: 2000));
+      expect(job.bytesPerSecond, 1000);
+      expect(job.estimatedRemaining, const Duration(seconds: 8));
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(downloadStatus(verified: 3000, total: 0));
+      expect(
+        job.estimatedRemaining,
+        isNull,
+        reason: 'Unknown totals cannot yield a remaining-time estimate.',
+      );
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(downloadStatus(verified: 10000));
+      expect(
+        job.estimatedRemaining,
+        isNull,
+        reason: 'Verification may still be running after all bytes arrive.',
+      );
+    },
+  );
+
+  test('a long sampling gap establishes a fresh payload baseline', () {
+    var elapsed = Duration.zero;
+    final job = SharedFileDownload(
+      request: downloadRequest(),
+      name: 'run-1',
+      elapsed: () => elapsed,
+    );
+    job.updateStatus(downloadStatus(verified: 1000, downloaded: 0));
+    elapsed += const Duration(seconds: 1);
+    job.updateStatus(downloadStatus(verified: 2000, downloaded: 1000));
+    expect(job.bytesPerSecond, 1000);
+    elapsed += const Duration(seconds: 19);
+    job.updateStatus(downloadStatus(verified: 6000, downloaded: 5000));
+    expect(
+      job.bytesPerSecond,
+      isNull,
+      reason: 'A delayed native reply is not a recent speed measurement.',
+    );
+    expect(job.estimatedRemaining, isNull);
+    elapsed += const Duration(seconds: 1);
+    job.updateStatus(downloadStatus(verified: 7000, downloaded: 6000));
+    expect(job.bytesPerSecond, 1000);
+    expect(job.estimatedRemaining, const Duration(seconds: 3));
+  });
+
+  test(
+    'download rate leaves an old burst out of its recent sampling window',
+    () {
+      var elapsed = Duration.zero;
+      final job = SharedFileDownload(
+        request: downloadRequest(),
+        name: 'run-1',
+        elapsed: () => elapsed,
+      );
+      job.updateStatus(
+        downloadStatus(verified: 0, downloaded: 0, total: 100000),
+      );
+      for (var second = 1; second <= 12; second++) {
+        elapsed = Duration(seconds: second);
+        final bytes = 10000 + (second - 1) * 1000;
+        job.updateStatus(
+          downloadStatus(verified: bytes, downloaded: bytes, total: 100000),
+        );
+      }
+      expect(
+        job.bytesPerSecond,
+        1000,
+        reason: 'The startup burst must not inflate speed for the whole job.',
+      );
+    },
+  );
+
+  test(
+    'restored and resumed downloads establish fresh rate baselines',
+    () async {
+      var elapsed = Duration.zero;
+      final backend = ShareBackend();
+      final downloads = SharedFileDownloads(backend, elapsed: () => elapsed);
+      addTearDown(downloads.dispose);
+      downloads.restore([
+        {
+          ...downloadStatus(verified: 8000, downloaded: 6000),
+          'name': 'run-1',
+          'request': downloadRequest(),
+        },
+      ]);
+      final job = downloads.jobs.single;
+      expect(job.bytesPerSecond, isNull);
+      elapsed += const Duration(seconds: 1);
+      backend.status = downloadStatus(verified: 9000, downloaded: 7000);
+      await downloads.poll();
+      expect(job.bytesPerSecond, 1000);
+      expect(job.estimatedRemaining, const Duration(seconds: 1));
+      await downloads.cancel(job);
+      expect(job.bytesPerSecond, isNull);
+      expect(job.estimatedRemaining, isNull);
+      backend.status = downloadStatus(
+        verified: 9500,
+        downloaded: 0,
+        transfer: 'd' * 64,
+      );
+      await downloads.start(job);
+      expect(
+        job.bytesPerSecond,
+        isNull,
+        reason: 'Resume must not count the retained destination bytes.',
+      );
+      elapsed += const Duration(seconds: 1);
+      backend.status = downloadStatus(
+        verified: 9600,
+        downloaded: 100,
+        transfer: 'd' * 64,
+      );
+      await downloads.poll();
+      expect(job.bytesPerSecond, 100);
+      expect(job.estimatedRemaining, const Duration(seconds: 4));
+    },
+  );
+
+  test(
+    'a failed owner poll clears rate and requires a fresh observation',
+    () async {
+      var elapsed = Duration.zero;
+      final backend = ShareBackend()
+        ..status = downloadStatus(verified: 1000, downloaded: 0);
+      final downloads = SharedFileDownloads(backend, elapsed: () => elapsed);
+      addTearDown(downloads.dispose);
+      final job = SharedFileDownload(
+        request: downloadRequest(),
+        name: 'run-1',
+        elapsed: () => elapsed,
+      );
+      await downloads.start(job);
+      elapsed += const Duration(seconds: 1);
+      backend.status = downloadStatus(verified: 2000, downloaded: 1000);
+      await downloads.poll();
+      expect(job.bytesPerSecond, 1000);
+      backend.statusError = const FormatException('Local device unavailable');
+      elapsed += const Duration(seconds: 1);
+      await downloads.poll();
+      expect(job.bytesPerSecond, isNull);
+      expect(job.estimatedRemaining, isNull);
+      backend.statusError = null;
+      backend.status = downloadStatus(verified: 8000, downloaded: 7000);
+      elapsed += const Duration(seconds: 1);
+      await downloads.poll();
+      expect(
+        job.bytesPerSecond,
+        isNull,
+        reason: 'The disconnected interval must not become a speed sample.',
+      );
+    },
+  );
+
+  test(
+    'pausing hides estimates before the native acknowledgment arrives',
+    () async {
+      var elapsed = Duration.zero;
+      final backend = DelayedStatusShareBackend()
+        ..status = downloadStatus(verified: 1000, downloaded: 0)
+        ..holdCancel = true;
+      final downloads = SharedFileDownloads(backend, elapsed: () => elapsed);
+      addTearDown(downloads.dispose);
+      final job = SharedFileDownload(
+        request: downloadRequest(),
+        name: 'run-1',
+        elapsed: () => elapsed,
+      );
+      await downloads.start(job);
+      elapsed += const Duration(seconds: 1);
+      backend.status = downloadStatus(verified: 2000, downloaded: 1000);
+      await downloads.poll();
+      expect(job.bytesPerSecond, 1000);
+      final cancelling = downloads.cancel(job);
+      expect(backend.cancelReply.isCompleted, isFalse);
+      expect(job.status['state'], 'running');
+      expect(job.cancelling, isTrue);
+      expect(job.bytesPerSecond, isNull);
+      expect(job.estimatedRemaining, isNull);
+      backend.cancelReply.complete({...backend.status, 'state': 'cancelled'});
+      await cancelling;
+      expect(job.cancelling, isFalse);
+      expect(job.status['state'], 'cancelled');
+    },
+  );
+
+  for (final size in [const Size(960, 900), const Size(360, 780)]) {
+    testWidgets(
+      'download speed and ETA remain current at ${size.width.toInt()}px while a native poll waits',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = size;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        var elapsed = Duration.zero;
+        final backend = DelayedStatusShareBackend()
+          ..status = downloadStatus(
+            verified: 1024,
+            downloaded: 0,
+            total: 10240,
+          );
+        final downloads = SharedFileDownloads(backend, elapsed: () => elapsed);
+        addTearDown(downloads.dispose);
+        final job = SharedFileDownload(
+          request: downloadRequest(),
+          name: 'f' * 40,
+          elapsed: () => elapsed,
+        );
+        await downloads.start(job);
+        await tester.pumpWidget(
+          RepaintBoundary(
+            key: const ValueKey('share-preview'),
+            child: MaterialApp(
+              debugShowCheckedModeBanner: false,
+              theme: wispTheme(),
+              home: Scaffold(
+                body: SingleChildScrollView(
+                  padding: const EdgeInsets.all(20),
+                  child: SharedDownloadsList(downloads: downloads),
+                ),
+              ),
+            ),
+          ),
+        );
+        expect(
+          find.text('Measuring download speed…').hitTestable(),
+          findsOneWidget,
+        );
+        elapsed += const Duration(seconds: 1);
+        backend.status = downloadStatus(
+          verified: 2048,
+          downloaded: 1024,
+          total: 10240,
+        );
+        await downloads.poll();
+        await tester.pump();
+        expect(find.text('1.0 KB/s').hitTestable(), findsOneWidget);
+        expect(find.text('About 8s remaining').hitTestable(), findsOneWidget);
+        await captureShare(
+          tester,
+          '${size.width < 500 ? 'phone' : 'desktop'}-download-rate',
+        );
+
+        backend.holdStatus = true;
+        final pending = downloads.poll();
+        elapsed += const Duration(seconds: 3);
+        await tester.pump(const Duration(seconds: 3));
+        expect(backend.statusReply.isCompleted, isFalse);
+        expect(find.text('0 B/s').hitTestable(), findsOneWidget);
+        expect(
+          find.text('Estimating time remaining…').hitTestable(),
+          findsOneWidget,
+        );
+        expect(
+          find.text('About 8s remaining'),
+          findsNothing,
+          reason: 'A blocked owner call must not leave an old ETA onscreen.',
+        );
+        backend.statusReply.complete({...backend.status, 'state': 'complete'});
+        await pending;
+        await tester.pump();
+        expect(find.text('0 B/s'), findsNothing);
+        expect(find.text('Estimating time remaining…'), findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  testWidgets('remaining time rounds up in seconds, minutes and hours', (
+    tester,
+  ) async {
+    for (final (remainingBytes, label) in [
+      (500, 'About 1s remaining'),
+      (8000, 'About 8s remaining'),
+      (61000, 'About 2m remaining'),
+      (3601000, 'About 2h remaining'),
+    ]) {
+      var elapsed = Duration.zero;
+      final downloads = SharedFileDownloads(ShareBackend());
+      final job = SharedFileDownload(
+        request: downloadRequest(),
+        name: 'run-1',
+        elapsed: () => elapsed,
+      );
+      job.updateStatus(
+        downloadStatus(
+          verified: 1000,
+          downloaded: 0,
+          total: 2000 + remainingBytes,
+        ),
+      );
+      elapsed += const Duration(seconds: 1);
+      job.updateStatus(
+        downloadStatus(
+          verified: 2000,
+          downloaded: 1000,
+          total: 2000 + remainingBytes,
+        ),
+      );
+      downloads.jobs.add(job);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: wispTheme(),
+          home: Scaffold(body: SharedDownloadsList(downloads: downloads)),
+        ),
+      );
+      expect(find.text(label), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      downloads.dispose();
+    }
   });
 
   testWidgets(

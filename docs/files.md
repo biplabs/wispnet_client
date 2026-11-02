@@ -207,6 +207,13 @@ copy, and success is reported only after it closes. The verified staging copy
 is removed after publication. Downloads and cancellation remain in the Android
 network process if the UI is recreated; after a network-process restart,
 select the same source and destination to recover durable transfer state.
+While downloading, progress cards show a smoothed speed and an approximate time
+remaining once enough samples and the total size are available. Speed counts
+newly received original file bytes, excluding saved resume data and completed
+files. Preparation, verification and Android publication have their own status;
+they do not advertise a transfer speed. Stalled or unavailable updates clear the
+estimate. Older local nodes without the fresh-byte counter cannot show reliable
+folder speeds, but updated local clients measure downloads from older sources.
 On Android, open **Settings → Local services → Add folder → Share files**. Choose a
 folder with Android's system picker, then select the paired devices allowed to
 browse and download that share. Each share has its own device list; receiving

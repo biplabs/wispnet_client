@@ -177,26 +177,51 @@ async fn read_share_browse_download_resume_and_inbox_permissions_are_independent
                 &output,
                 TransferOptions {
                     progress: Some(Arc::new(move |p| {
-                        if p.phase == "transferring" {
-                            progress.lock().unwrap().push(p.verified_bytes);
-                        }
+                        progress.lock().unwrap().push(p);
                     })),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        assert_eq!(seen.lock().unwrap()[0], wispnet_files::MAX_CHUNK as u64);
+        {
+            let samples = seen.lock().unwrap();
+            let first = samples.iter().find(|p| p.phase == "transferring").unwrap();
+            assert_eq!(first.verified_bytes, wispnet_files::MAX_CHUNK as u64);
+            assert_eq!(first.downloaded_bytes, Some(0));
+            assert_eq!(
+                samples.last().unwrap().downloaded_bytes,
+                Some(info.size_bytes - wispnet_files::MAX_CHUNK as u64),
+                "The saved prefix must not count as newly downloaded payload"
+            );
+            assert!(
+                samples
+                    .windows(2)
+                    .all(|pair| pair[0].downloaded_bytes <= pair[1].downloaded_bytes)
+            );
+        }
         assert_eq!(wispnet_files::hash_file(&output).unwrap(), info.sha256);
+        let skipped = Arc::new(Mutex::new(Vec::new()));
+        let recorded = skipped.clone();
         client
             .get_file(
                 target.clone(),
                 "epoch-10.bin",
                 &output,
-                TransferOptions::default(),
+                TransferOptions {
+                    progress: Some(Arc::new(move |p| recorded.lock().unwrap().push(p))),
+                    ..Default::default()
+                },
             )
             .await
             .unwrap();
+        assert!(
+            skipped
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|p| p.downloaded_bytes == Some(0))
+        );
         assert_eq!(
             client
                 .get_file(
@@ -397,6 +422,8 @@ async fn folder_download_preserves_tree_and_resumes_across_client_restart() {
         let key = SecretKey::generate();
         let run = shared.path().join("run-1");
         std::fs::create_dir_all(run.join("nested/empty")).unwrap();
+        let ready = b"verified metadata";
+        std::fs::write(run.join("0-ready.bin"), ready).unwrap();
         source(&run.join("a-checkpoint.bin"));
         std::fs::write(run.join("nested/模型.json"), b"{\"epoch\":10}").unwrap();
         for i in 0..40 {
@@ -437,17 +464,41 @@ async fn folder_download_preserves_tree_and_resumes_across_client_restart() {
                 &output,
                 TransferOptions {
                     progress: Some(Arc::new(move |p| {
-                        if p.phase == "transferring" {
-                            recorded.lock().unwrap().push(p.verified_bytes);
-                        }
+                        recorded.lock().unwrap().push(p);
                     })),
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        assert_eq!(folder.files_total, 42);
-        assert_eq!(seen.lock().unwrap()[0], wispnet_files::MAX_CHUNK as u64);
+        assert_eq!(folder.files_total, 43);
+        {
+            let samples = seen.lock().unwrap();
+            let saved_prefix = wispnet_files::MAX_CHUNK as u64 + ready.len() as u64;
+            assert!(
+                samples.iter().any(
+                    |p| p.verified_bytes == ready.len() as u64 && p.downloaded_bytes == Some(0)
+                ),
+                "An already complete child advances progress without downloading bytes"
+            );
+            assert!(
+                samples
+                    .iter()
+                    .any(|p| p.verified_bytes == saved_prefix && p.downloaded_bytes == Some(0)),
+                "A later child's resumed prefix must not count as new bytes"
+            );
+            assert_eq!(
+                samples.last().unwrap().downloaded_bytes,
+                Some(folder.size_bytes - saved_prefix)
+            );
+            assert!(
+                samples
+                    .windows(2)
+                    .all(|pair| pair[0].downloaded_bytes <= pair[1].downloaded_bytes),
+                "The attempt counter must remain cumulative across child and phase changes"
+            );
+        }
+        assert_eq!(std::fs::read(output.join("0-ready.bin")).unwrap(), ready);
         assert_eq!(
             std::fs::read(output.join("a-checkpoint.bin")).unwrap(),
             std::fs::read(run.join("a-checkpoint.bin")).unwrap()
@@ -463,10 +514,32 @@ async fn folder_download_preserves_tree_and_resumes_across_client_restart() {
         );
         // A retained receipt recognizes our completed directory and never
         // substitutes an unrelated pre-existing destination.
+        let skipped = Arc::new(Mutex::new(Vec::new()));
+        let recorded = skipped.clone();
         client
-            .get_folder(target.clone(), "run-1", &output, TransferOptions::default())
+            .get_folder(
+                target.clone(),
+                "run-1",
+                &output,
+                TransferOptions {
+                    progress: Some(Arc::new(move |p| recorded.lock().unwrap().push(p))),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
+        assert_eq!(
+            skipped.lock().unwrap().last().unwrap().verified_bytes,
+            folder.size_bytes
+        );
+        assert!(
+            skipped
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|p| p.downloaded_bytes == Some(0)),
+            "Re-verifying a complete folder does not download its existing contents"
+        );
         assert_eq!(
             client
                 .get_folder(
@@ -634,8 +707,31 @@ async fn owner_stat_and_expected_version_pin_download_before_publication() {
         }
         assert_eq!(status["state"], "failed");
         assert_eq!(status["error"]["code"], "STALE_VERSION");
+        assert_eq!(status["downloaded_bytes"], 0);
         break;
     }
     assert!(!dest.path().join("config.json").exists());
+    // Owner-local snapshots expose newly received payload, independently of a
+    // completed destination's full progress on a matching resume.
+    for downloaded in [7, 0] {
+        let started = client.command(&json!({"op":"file_get","host":target.host,"service":target.service,"incarnation":target.incarnation,"path":"config.json","local_path":dest.path().join("new-config.json")})).await.unwrap();
+        let status = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let status = client
+                    .command(&json!({"op":"file_status","transfer":started["transfer"]}))
+                    .await
+                    .unwrap();
+                if status["state"] != "running" {
+                    break status;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(status["state"], "complete", "{status}");
+        assert_eq!(status["verified_bytes"], 7);
+        assert_eq!(status["downloaded_bytes"], downloaded);
+    }
     client.endpoint.close().await;
 }

@@ -16,6 +16,9 @@ struct ShareSession {
     stream: BoxStream,
     _resources: Resources,
     encoded: bool,
+    // One download attempt can span folder children and reconnect its stream.
+    // Only newly acknowledged decoded payload contributes to this counter.
+    downloaded_bytes: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -205,6 +208,9 @@ impl Client {
             ),
             finished: Mutex::new(None),
         });
+        if !inspecting {
+            job.status.lock().unwrap_or_else(|e| e.into_inner())["downloaded_bytes"] = json!(0);
+        }
         {
             let mut jobs = self.files.jobs.lock().unwrap_or_else(|e| e.into_inner());
             jobs.retain(|_, job| {
@@ -244,6 +250,9 @@ impl Client {
                 s["phase"] = json!(p.phase);
                 s["verified_bytes"] = json!(p.verified_bytes);
                 s["size_bytes"] = json!(p.size_bytes);
+                if let Some(n) = p.downloaded_bytes {
+                    s["downloaded_bytes"] = json!(n);
+                }
                 if let Some(n) = p.files_complete {
                     s["files_complete"] = json!(n);
                 }
@@ -349,6 +358,7 @@ impl Client {
                 stream,
                 _resources: resources,
                 encoded,
+                downloaded_bytes: 0,
             });
         }
         // Legacy peers may close the stream on the unknown capability request.
@@ -360,6 +370,7 @@ impl Client {
             stream,
             _resources: resources,
             encoded: false,
+            downloaded_bytes: 0,
         })
     }
 
@@ -625,7 +636,12 @@ impl Client {
         })
         .await?;
         if existing && options.resume {
-            options.report("complete", info.size_bytes, info.size_bytes);
+            options.report_download(
+                "complete",
+                info.size_bytes,
+                info.size_bytes,
+                session.downloaded_bytes,
+            );
             return Ok(info);
         }
         if std::fs::symlink_metadata(&local).is_ok() {
@@ -702,7 +718,12 @@ impl Client {
             return Err(protocol_error());
         }
         save_download_journal(&resume.journal, &journal, &resume._lock).await?;
-        options.report("transferring", journal.offset, info.size_bytes);
+        options.report_download(
+            "transferring",
+            journal.offset,
+            info.size_bytes,
+            session.downloaded_bytes,
+        );
         let mut retries = 0;
         'transfer: while journal.offset < info.size_bytes {
             // Queue a bounded window before reading payloads so WAN RTT does
@@ -734,7 +755,9 @@ impl Client {
                     let error = TransferError::io(error);
                     if retryable(&error) && retries < MAX_RETRIES {
                         retries += 1;
+                        let downloaded_bytes = session.downloaded_bytes;
                         *session = self.share_session(&target).await?;
+                        session.downloaded_bytes = downloaded_bytes;
                         continue 'transfer;
                     }
                     return Err(error);
@@ -764,7 +787,9 @@ impl Client {
                     Ok(_) => return Err(protocol_error()),
                     Err(error) if retryable(&error) && retries < MAX_RETRIES => {
                         retries += 1;
+                        let downloaded_bytes = session.downloaded_bytes;
                         *session = self.share_session(&target).await?;
+                        session.downloaded_bytes = downloaded_bytes;
                         continue 'transfer;
                     }
                     Err(error) => return Err(error),
@@ -784,7 +809,13 @@ impl Client {
                 .await?;
                 journal.offset += count;
                 save_download_journal(&resume.journal, &journal, &resume._lock).await?;
-                options.report("transferring", journal.offset, info.size_bytes);
+                session.downloaded_bytes += count;
+                options.report_download(
+                    "transferring",
+                    journal.offset,
+                    info.size_bytes,
+                    session.downloaded_bytes,
+                );
                 if options.cancellation.is_cancelled() {
                     return Err(TransferError::new(
                         "CANCELLED",
@@ -793,7 +824,12 @@ impl Client {
                 }
             }
         }
-        options.report("verifying", info.size_bytes, info.size_bytes);
+        options.report_download(
+            "verifying",
+            info.size_bytes,
+            info.size_bytes,
+            session.downloaded_bytes,
+        );
         let verified_fingerprint = blocking({
             let output = output.clone();
             let expected = info.sha256.clone();
@@ -864,7 +900,12 @@ impl Client {
             }
         })
         .await?;
-        options.report("complete", info.size_bytes, info.size_bytes);
+        options.report_download(
+            "complete",
+            info.size_bytes,
+            info.size_bytes,
+            session.downloaded_bytes,
+        );
         Ok(info)
     }
 }

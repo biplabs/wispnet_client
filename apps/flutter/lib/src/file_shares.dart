@@ -15,22 +15,120 @@ String _shareFailure(Object error) => error is FormatException
     : error.toString();
 
 class SharedFileDownload {
-  SharedFileDownload({required this.request, required this.name});
+  SharedFileDownload({required this.request, required this.name, this.elapsed});
   final Map<String, dynamic> request;
   final String name;
+  final Duration Function()? elapsed;
+  final _clock = Stopwatch()..start();
+  final _samples = <({Duration at, int bytes})>[];
+  Duration? _lastProgressAt;
+  double? _bytesPerSecond;
+  bool _freshBytes = false;
   Map<String, dynamic> status = {'state': 'starting'};
   int generation = 0;
   String? failure;
+  bool cancelling = false;
   bool get finished =>
       const ['complete', 'failed', 'cancelled'].contains(status['state']);
   String? get transfer => status['transfer'] as String?;
+  Duration get _now => elapsed?.call() ?? _clock.elapsed;
+  bool get canMeasureSpeed =>
+      request['recursive'] != true || status['downloaded_bytes'] is num;
+  bool get downloading =>
+      status['state'] == 'running' &&
+      const [
+        'downloading',
+        'transferring',
+        'receiving',
+      ].contains(status['phase']) &&
+      failure == null &&
+      status['error'] == null &&
+      !cancelling;
+
+  double? get bytesPerSecond {
+    if (!downloading || !canMeasureSpeed || _samples.isEmpty) return null;
+    final now = _now;
+    if (now < _samples.last.at) return null;
+    if (now - _samples.last.at >= const Duration(seconds: 3) ||
+        (_lastProgressAt != null &&
+            now - _lastProgressAt! >= const Duration(seconds: 3))) {
+      return 0;
+    }
+    return _bytesPerSecond;
+  }
+
+  Duration? get estimatedRemaining {
+    final rate = bytesPerSecond;
+    final total = (status['size_bytes'] as num?)?.toInt() ?? 0;
+    final verified = (status['verified_bytes'] as num?)?.toInt() ?? 0;
+    if (rate == null || rate <= 0 || total <= 0 || verified >= total) {
+      return null;
+    }
+    final micros = (total - verified) / rate * Duration.microsecondsPerSecond;
+    if (!micros.isFinite || micros >= 0x7fffffffffffffff) return null;
+    return Duration(microseconds: micros.ceil());
+  }
+
+  void _resetSpeed() {
+    _samples.clear();
+    _lastProgressAt = null;
+    _bytesPerSecond = null;
+  }
+
+  void updateStatus(Map<String, dynamic> next) {
+    final previousTransfer = transfer;
+    final previousVerified = (status['verified_bytes'] as num?)?.toInt() ?? 0;
+    status = next;
+    if (finished) cancelling = false;
+    if (!downloading || !canMeasureSpeed) {
+      _resetSpeed();
+      return;
+    }
+    final fresh = status['downloaded_bytes'] is num;
+    final verified = (status['verified_bytes'] as num?)?.toInt() ?? 0;
+    final bytes = fresh
+        ? (status['downloaded_bytes'] as num).toInt()
+        : verified;
+    final now = _now;
+    final previous = _samples.isEmpty ? null : _samples.last;
+    if (bytes < 0) {
+      _resetSpeed();
+      return;
+    }
+    if (previous == null ||
+        previousTransfer != transfer ||
+        now < previous.at ||
+        now - previous.at > const Duration(seconds: 10) ||
+        bytes < previous.bytes ||
+        verified < previousVerified ||
+        fresh != _freshBytes) {
+      _resetSpeed();
+      _freshBytes = fresh;
+      _lastProgressAt = now;
+      _samples.add((at: now, bytes: bytes));
+      return;
+    }
+    if (now == previous.at) return;
+    if (bytes > previous.bytes) _lastProgressAt = now;
+    _samples.add((at: now, bytes: bytes));
+    final cutoff = now - const Duration(seconds: 10);
+    while (_samples.length > 2 && _samples[1].at <= cutoff) {
+      _samples.removeAt(0);
+    }
+    final first = _samples.first;
+    _bytesPerSecond =
+        (bytes - first.bytes) *
+        Duration.microsecondsPerSecond /
+        (now - first.at).inMicroseconds;
+  }
 }
 
 /// Tracks native downloads while the browser sheet is closed. File contents
 /// remain in the native transfer service; Flutter only holds job metadata.
 class SharedFileDownloads extends ChangeNotifier {
-  SharedFileDownloads(this.backend);
+  SharedFileDownloads(this.backend, {this.elapsed});
   final WispnetBackend backend;
+  final Duration Function()? elapsed;
   final List<SharedFileDownload> jobs = [];
   final Set<String> _dismissed = {};
   Timer? _timer;
@@ -40,14 +138,25 @@ class SharedFileDownloads extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  void _startPolling() {
+    if (!_disposed && jobs.any((job) => !job.finished)) {
+      _timer ??= Timer.periodic(const Duration(seconds: 1), (_) {
+        // A pending native response must not leave an old speed/ETA visible.
+        _changed();
+        unawaited(poll());
+      });
+    }
+  }
+
   Future<void> start(SharedFileDownload job, {bool resume = true}) async {
     if (jobs.contains(job) && !job.finished) return;
     if (!jobs.contains(job)) jobs.add(job);
     final superseded = job.transfer;
     if (superseded != null) _dismissed.add(superseded);
     final generation = ++job.generation;
-    job.status = {'state': 'starting'};
+    job.cancelling = false;
     job.failure = null;
+    job.updateStatus({'state': 'starting'});
     _changed();
     try {
       final status = await backend.invoke('shareGet', {
@@ -55,21 +164,20 @@ class SharedFileDownloads extends ChangeNotifier {
         'resume': resume,
       });
       if (generation != job.generation) return;
-      job.status = status;
+      job.updateStatus(status);
       if (job.transfer == null && !job.finished) {
         throw const FormatException('The download could not be started.');
       }
     } catch (error) {
-      job.status = {'state': 'failed'};
+      job.updateStatus({'state': 'failed'});
       job.failure = _shareFailure(error);
     }
     _changed();
-    if (!_disposed && jobs.any((job) => !job.finished)) {
-      _timer ??= Timer.periodic(const Duration(seconds: 1), (_) => poll());
-    }
+    _startPolling();
   }
 
   void restore(List<dynamic> transfers) {
+    var added = false;
     for (final entry in transfers.whereType<Map>()) {
       final transfer = entry['transfer'];
       final request = entry['request'];
@@ -77,17 +185,18 @@ class SharedFileDownloads extends ChangeNotifier {
       if (_dismissed.contains(transfer)) continue;
       if (jobs.any((job) => job.transfer == transfer)) continue;
       final job = SharedFileDownload(
+        elapsed: elapsed,
         request: request.cast<String, dynamic>(),
         name:
             entry['name'] as String? ??
             request['name'] as String? ??
             'Download',
-      )..status = entry.cast<String, dynamic>();
+      )..updateStatus(entry.cast<String, dynamic>());
       jobs.add(job);
+      added = true;
     }
-    if (!_disposed && jobs.any((job) => !job.finished)) {
-      _timer ??= Timer.periodic(const Duration(seconds: 1), (_) => poll());
-    }
+    if (added) _changed();
+    _startPolling();
   }
 
   void clearFinished() {
@@ -113,14 +222,15 @@ class SharedFileDownloads extends ChangeNotifier {
             'transfer': job.transfer,
           });
           if (generation != job.generation) continue;
-          job.status = status;
           job.failure = null;
+          job.updateStatus(status);
         } catch (error) {
           if (generation != job.generation) continue;
           if (_missingHandle(job, error)) continue;
           // Preserve the handle: an interrupted owner connection does not mean
           // the native job stopped, and must never start a second download.
           job.failure = 'Waiting for the local device: ${_shareFailure(error)}';
+          job._resetSpeed();
         }
       }
       _changed();
@@ -134,17 +244,21 @@ class SharedFileDownloads extends ChangeNotifier {
   }
 
   Future<void> cancel(SharedFileDownload job) async {
-    if (job.transfer == null || job.finished) return;
+    if (job.transfer == null || job.finished || job.cancelling) return;
     final generation = ++job.generation;
+    job.cancelling = true;
+    job._resetSpeed();
+    _changed();
     try {
       final status = await backend.invoke('fileCancel', {
         'transfer': job.transfer,
       });
       if (generation != job.generation) return;
-      job.status = status;
       job.failure = null;
+      job.updateStatus(status);
     } catch (error) {
       if (generation != job.generation) return;
+      job.cancelling = false;
       if (_missingHandle(job, error)) {
         _changed();
         return;
@@ -158,14 +272,14 @@ class SharedFileDownloads extends ChangeNotifier {
     if (!_shareFailure(error).toLowerCase().contains('handle unavailable')) {
       return false;
     }
-    job.status = {
+    job.updateStatus({
       ...job.status,
       'state': 'failed',
       'error': {
         'code': 'TRANSFER_UNAVAILABLE',
         'message': 'This download is no longer active. Resume to recover its saved data.',
       },
-    };
+    });
     job.failure = null;
     return true;
   }
@@ -271,6 +385,7 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
       final folder = destination['path'] as String?;
       if (folder == null || folder.isEmpty || !mounted) return;
       final job = SharedFileDownload(
+        elapsed: widget.downloads.elapsed,
         name: name,
         request: {
           ...target,
@@ -462,18 +577,23 @@ class SharedDownloadTile extends StatelessWidget {
     final changed = error is Map && error['code'] == 'STALE_VERSION';
     final problem =
         job.failure ?? (error is Map ? error['message'] as String? : null);
-    final label = switch (state) {
-      'starting' => 'Starting download…',
-      'failed' => 'Download failed',
-      'cancelled' => 'Download paused',
-      _ => switch (job.status['phase']) {
-        'queued' => 'Download queued',
-        'preparing' => folder ? 'Preparing folder…' : 'Preparing download…',
-        'verifying' => 'Verifying download…',
-        'saving' => 'Saving download…',
-        _ => 'Downloading',
-      },
-    };
+    final speed = job.bytesPerSecond;
+    final remaining = job.estimatedRemaining;
+    final label = job.cancelling
+        ? 'Pausing download…'
+        : switch (state) {
+            'starting' => 'Starting download…',
+            'failed' => 'Download failed',
+            'cancelled' => 'Download paused',
+            _ => switch (job.status['phase']) {
+              'queued' => 'Download queued',
+              'preparing' =>
+                folder ? 'Preparing folder…' : 'Preparing download…',
+              'verifying' => 'Verifying download…',
+              'saving' => 'Saving download…',
+              _ => 'Downloading',
+            },
+          };
     return Padding(
       padding: const EdgeInsets.only(top: 8),
       child: WispPanel(
@@ -492,6 +612,27 @@ class SharedDownloadTile extends StatelessWidget {
                 filesTotal != null &&
                 (filesTotal > 0 || state == 'complete'))
               Text('$filesComplete / $filesTotal files'),
+            if (job.downloading && !job.canMeasureSpeed)
+              const Text('Download speed unavailable'),
+            if (job.downloading && job.canMeasureSpeed) ...[
+              Text(
+                speed == null
+                    ? 'Measuring download speed…'
+                    : speed > 0 && speed < 1
+                    ? '<1 B/s'
+                    : '${fileSize(speed.round())}/s',
+                style: const TextStyle(
+                  color: WispColors.cyan,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (size > 0 && verified < size)
+                Text(
+                  remaining == null
+                      ? 'Estimating time remaining…'
+                      : 'About ${_downloadTime(remaining)} remaining',
+                ),
+            ],
             if (!job.finished)
               LinearProgressIndicator(
                 value: size > 0 ? (verified / size).clamp(0, 1) : null,
@@ -500,7 +641,7 @@ class SharedDownloadTile extends StatelessWidget {
               Text(problem, style: const TextStyle(color: WispColors.error)),
             if (!job.finished && job.transfer != null)
               TextButton(
-                onPressed: () => downloads.cancel(job),
+                onPressed: job.cancelling ? null : () => downloads.cancel(job),
                 child: const Text('Cancel download'),
               ),
             if (state == 'failed' || state == 'cancelled')
@@ -513,6 +654,15 @@ class SharedDownloadTile extends StatelessWidget {
       ),
     );
   }
+}
+
+String _downloadTime(Duration duration) {
+  final seconds = (duration.inMicroseconds / Duration.microsecondsPerSecond)
+      .ceil();
+  if (seconds < 60) return '${seconds}s';
+  if (seconds < 3600) return '${(seconds / 60).ceil()}m';
+  if (seconds < 86400) return '${(seconds / 3600).ceil()}h';
+  return '${(seconds / 86400).ceil()}d';
 }
 
 class FileShareEditor extends StatefulWidget {

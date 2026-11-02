@@ -42,7 +42,7 @@ final class AndroidDownloads implements AutoCloseable {
    this.request = request; this.root = root; this.name = name; this.binding = binding; this.staged = staged;
    this.recursive = recursive;
    status = new JSONObject().put("transfer", id).put("state", "running").put("phase", "queued")
-       .put("verified_bytes", 0).put("size_bytes", 0);
+       .put("verified_bytes", 0).put("size_bytes", 0).put("downloaded_bytes", 0);
   }
  }
 
@@ -230,11 +230,11 @@ final class AndroidDownloads implements AutoCloseable {
   }
   check(job);
   JSONArray entries = plan.getJSONArray("entries");
-  long total = plan.getLong("size_bytes"), completed = 0; int files = plan.getInt("files_total"), done = 0;
+  long total = plan.getLong("size_bytes"), completed = 0, downloaded = 0; int files = plan.getInt("files_total"), done = 0;
   AndroidReceiving receiving = new AndroidReceiving(context);
   receiving.claimDownloadDirectory(job.root, job.name, job.binding, () -> cancelled(job));
   synchronized (job) { job.status.put("recursive", true).put("files_total", files).put("files_complete", 0)
-      .put("size_bytes", total).put("verified_bytes", 0).put("phase", "transferring"); }
+      .put("size_bytes", total).put("verified_bytes", 0).put("downloaded_bytes", 0).put("phase", "transferring"); }
   for (int index = 0; index < entries.length(); index++) {
    check(job);
    JSONObject entry = entries.getJSONObject(index);
@@ -253,8 +253,12 @@ final class AndroidDownloads implements AutoCloseable {
      throw new Exception("Cannot discard the previous staged download");
     JSONObject request = target(job.request).put("op", "file_get").put("path", remote)
         .put("local_path", staged.getCanonicalPath()).put("resume", resume).put("expected_version", info.getString("file_version"));
-    JSONObject actual = awaitFile(job, request, completed, total, done, files, relative).getJSONObject("file");
+    JSONObject child = awaitFile(job, request, completed, total, done, files, relative, downloaded);
+    JSONObject actual = child.getJSONObject("file");
     requireSameFile(info, actual);
+    // Native child counters exclude saved prefixes and already complete staging
+    // files. Provider verification/publication does not download any new bytes.
+    downloaded += child.optLong("downloaded_bytes");
     phase(job, "saving");
     try (ParcelFileDescriptor source = ParcelFileDescriptor.open(staged, ParcelFileDescriptor.MODE_READ_ONLY)) {
      String result = receiving.publish(publication, source.getFd(), () -> cancelled(job));
@@ -265,7 +269,7 @@ final class AndroidDownloads implements AutoCloseable {
     if (!staged.delete()) throw new Exception("Cannot remove the verified staging file");
    }
    completed += info.getLong("size_bytes"); done++;
-   synchronized (job) { job.status.put("verified_bytes", completed).put("files_complete", done); }
+   synchronized (job) { job.status.put("verified_bytes", completed).put("files_complete", done).put("downloaded_bytes", downloaded); }
   }
   phase(job, "verifying");
   requireSameListing(plan.getJSONArray("entries"), enumerate(job));
@@ -275,10 +279,11 @@ final class AndroidDownloads implements AutoCloseable {
   }
   check(job);
   synchronized (job) { job.status.put("state", "complete").put("phase", "complete")
-      .put("verified_bytes", total).put("size_bytes", total).put("files_complete", files).put("files_total", files); }
+      .put("verified_bytes", total).put("size_bytes", total).put("files_complete", files).put("files_total", files)
+      .put("downloaded_bytes", downloaded); }
  }
 
- private JSONObject awaitFile(Job job, JSONObject request, long completed, long total, int done, int files, String path) throws Exception {
+ private JSONObject awaitFile(Job job, JSONObject request, long completed, long total, int done, int files, String path, long downloaded) throws Exception {
   check(job);
   JSONObject status = Native.request(request);
   job.nativeId = status.getString("transfer");
@@ -286,6 +291,7 @@ final class AndroidDownloads implements AutoCloseable {
    synchronized (job) {
     job.status = new JSONObject(status.toString()).put("transfer", job.id).put("state", "running")
         .put("recursive", true).put("current_path", path).put("verified_bytes", completed + status.optLong("verified_bytes"))
+        .put("downloaded_bytes", downloaded + status.optLong("downloaded_bytes"))
         .put("size_bytes", total).put("files_total", files).put("files_complete", done);
     if ("complete".equals(status.optString("state"))) job.status.put("phase", "saving");
    }

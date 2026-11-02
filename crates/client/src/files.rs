@@ -42,6 +42,10 @@ pub struct TransferProgress {
     pub phase: String,
     pub verified_bytes: u64,
     pub size_bytes: u64,
+    /// Newly received original file bytes in this download attempt. Resumed
+    /// prefixes and matching files already present on disk are excluded.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub downloaded_bytes: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files_complete: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -159,11 +163,32 @@ impl Default for TransferOptions {
 }
 impl TransferOptions {
     fn report(&self, phase: &str, verified_bytes: u64, size_bytes: u64) {
+        self.report_with_downloaded(phase, verified_bytes, size_bytes, None);
+    }
+
+    fn report_download(
+        &self,
+        phase: &str,
+        verified_bytes: u64,
+        size_bytes: u64,
+        downloaded_bytes: u64,
+    ) {
+        self.report_with_downloaded(phase, verified_bytes, size_bytes, Some(downloaded_bytes));
+    }
+
+    fn report_with_downloaded(
+        &self,
+        phase: &str,
+        verified_bytes: u64,
+        size_bytes: u64,
+        downloaded_bytes: Option<u64>,
+    ) {
         if let Some(progress) = &self.progress {
             progress(TransferProgress {
                 phase: phase.into(),
                 verified_bytes,
                 size_bytes,
+                downloaded_bytes,
                 files_complete: None,
                 files_total: None,
             });

@@ -79,7 +79,7 @@ impl Client {
         })
         .await?;
         let mut session = self.share_session(&target).await?;
-        folder_progress(options, "preparing", 0, 0, 0, 0);
+        folder_progress(options, "preparing", 0, 0, 0, 0, 0);
         let (directories, entries) = Self::folder_listing(&mut session, remote, options).await?;
         let mut manifest = if options.resume
             && let Some(saved) = saved.as_ref()
@@ -202,6 +202,7 @@ impl Client {
                             },
                             verified_bytes: base + p.verified_bytes,
                             size_bytes: total,
+                            downloaded_bytes: p.downloaded_bytes,
                             files_complete: Some(file_index),
                             files_total: Some(count),
                         });
@@ -225,11 +226,20 @@ impl Client {
                 total,
                 index as u64 + 1,
                 count,
+                session.downloaded_bytes,
             );
         }
         // Directory listings are live, not a filesystem snapshot. Refuse a
         // changed membership or changed file instead of silently mixing runs.
-        folder_progress(options, "verifying", total, total, count, count);
+        folder_progress(
+            options,
+            "verifying",
+            total,
+            total,
+            count,
+            count,
+            session.downloaded_bytes,
+        );
         let (directories, entries) = Self::folder_listing(&mut session, remote, options).await?;
         if !same_listing(&manifest, &directories, &entries) {
             return Err(stale_folder());
@@ -273,7 +283,15 @@ impl Client {
         .await?;
         manifest.complete = true;
         save_folder_manifest(&resume, &manifest).await?;
-        folder_progress(options, "complete", total, total, count, count);
+        folder_progress(
+            options,
+            "complete",
+            total,
+            total,
+            count,
+            count,
+            session.downloaded_bytes,
+        );
         Ok(FolderInfo {
             path: remote.into(),
             size_bytes: total,
@@ -344,12 +362,14 @@ fn folder_progress(
     total: u64,
     files: u64,
     count: u64,
+    downloaded_bytes: u64,
 ) {
     if let Some(progress) = &options.progress {
         progress(TransferProgress {
             phase: phase.into(),
             verified_bytes: bytes,
             size_bytes: total,
+            downloaded_bytes: Some(downloaded_bytes),
             files_complete: Some(files),
             files_total: Some(count),
         });
