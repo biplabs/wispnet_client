@@ -43,7 +43,7 @@ or a persisted service cache; #9 owns cache/revocation integration.
 
 ## Explicit network-change notification
 
-The pinned Iroh 1.3.0 API exposes `Endpoint::network_change()` for platforms whose
+The pinned Iroh 1.4.1 API exposes `Endpoint::network_change()` for platforms whose
 native route monitor cannot observe changes. Its Android native monitor is a
 stub; the Android app forwards its platform network callback to the
 same owned endpoint through AccessService/JNI. Replacing its key or restarting the endpoint is unnecessary.

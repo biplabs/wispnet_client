@@ -49,7 +49,7 @@ service access. Existing host-local approvals and service grants remain required
 ## Failure and recovery behavior
 
 Agent startup does not await a relay or another host: local authority remains
-available while offline. Pinned Iroh 1.3.0 maintains the outbound relay session
+available while offline. Pinned Iroh 1.4.1 maintains the outbound relay session
 and retries relay failures with its own exponential backoff. Each peer connection
 and catalog/service-open operation has a separate five-second deadline. Backend
 connects have a three-second deadline; established service streams retain their
@@ -228,7 +228,7 @@ peer lookup or publication is enabled. Certificate trust applies to both servers
 n0's public service is rate-limited and has no uptime guarantee. Omit
 `discovery_relay_url` and packet backups to restore the original single-relay behavior.
 
-When packet backups are configured, both discovery connections are retained and
+With the default warm-backup policy, both discovery connections are retained and
 queried independently. Android uses this parallel policy with our relay and n0. This needs
 an updated APK because both the native transport and its initialization setting
 are bundled in the app. Existing device identity and pairings are retained by an
@@ -243,6 +243,8 @@ Configure the same relay set on every paired node, including Android:
 bind_addr = "0.0.0.0:0"
 relay_url = "https://relay.wispnet.app"
 backup_relay_urls = ["https://usw1-1.relay.n0.iroh.link"]
+prefer_primary_relay = true
+keep_backup_relays_warm = true
 relay_only = false
 ```
 
@@ -253,14 +255,35 @@ host-local approvals remain valid. Both endpoints need this configuration and
 updated software; older clients still know only the original URL. A discovery-only
 observer is never implicitly promoted to a packet relay.
 
-Wispnet explicitly prefers `relay_url` as its home packet relay whenever its
+The two relay policy settings are independent and both default to `true`, preserving
+existing configurations. They take effect when `backup_relay_urls` is nonempty;
+the primary URL remains the invitation/bootstrap URL in every mode.
+
+| Setting | `true` (default) | `false` |
+| --- | --- | --- |
+| `prefer_primary_relay` | Prefer the healthy primary for home selection and relayed application data, with failure grace and stable failback. | Use Iroh's latency-based home selection and normal path ranking. |
+| `keep_backup_relays_warm` | Retain all configured packet and discovery sessions and their distinct observed addresses. | Let unused standby packet sessions expire and use Iroh's normal discovery-session retention. Backups remain dialing candidates. |
+
+For example, `prefer_primary_relay = false` with `keep_backup_relays_warm = true`
+keeps standby sessions ready while allowing latency to determine relay choice.
+Setting only `keep_backup_relays_warm = false` retains primary preference; active
+peer connections can still validate alternate relay paths, and the primary stays
+connected or retrying while a backup is home so stable failback can be observed.
+This setting therefore does not require every unused relay socket to close immediately.
+These are endpoint settings; change each node's configuration and restart its
+daemon (or app endpoint) to apply them. Existing identities and approvals remain valid.
+Relay operators configure the separate ingress rate limit in the relay's
+[`[client_rx]` settings](../config/relay/relay.toml); see
+[relay deployment](desktop-relay.md). That limit does not affect direct transfers.
+
+With primary preference enabled, Wispnet explicitly prefers `relay_url` as its home packet relay whenever its
 TLS-authenticated relay connection works. UDP discovery failure, a private
 observed address, and a faster n0 discovery response do not cause packet failover.
 After five seconds of detected primary unavailability (including startup dial
 failure), it selects a backup. Socket failure detection and reconnect timeouts
 can add time to recovery; five seconds is a grace period, not an outage SLA.
 
-Both configured packet relay connections remain active, including the standby.
+With warm backups enabled, both configured packet relay connections remain active, including the standby.
 Both QUIC discovery connections also remain active per available IP family.
 Every distinct observed address is retained, together with LAN/interface and
 port-mapped candidates, and advertised for direct-path validation. Private LAN
@@ -269,14 +292,14 @@ compared only between public observations; a LAN/hairpin result is not evidence
 of destination-dependent public NAT. Closed discovery sessions are
 retried on subsequent discovery runs; healthy sessions survive report refreshes.
 
-Packet path selection prefers a validated direct path over either relay. If
-relay is needed, it prefers the currently healthy primary relay path over a
+Packet path selection prefers a validated direct path over either relay. With
+primary preference enabled, if relay is needed it prefers the currently healthy primary relay path over a
 lower-latency n0 path. Both relay paths are validated and retained on existing
 peer connections, so a fast n0 handshake cannot permanently bypass our relay.
 Failed relay paths are retried and selection is refreshed every two seconds.
 Keeping a relay connection alive and using it for application data are separate.
 
-While using the backup, the primary must recover for 30 continuous seconds
+With primary preference enabled, while using the backup the primary must recover for 30 continuous seconds
 before it is preferred again; any disconnect resets the window. If the backup
 also fails and the primary already works, recovery can use the primary immediately.
 Peer connections can change validated paths without re-pairing. Direct paths

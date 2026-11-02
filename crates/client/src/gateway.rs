@@ -1,6 +1,6 @@
 //! Persistent, isolated loopback browser routes; authority is checked per request.
 use crate::Client;
-use iroh::{EndpointId, endpoint::Connection};
+use iroh::EndpointId;
 use std::{
     sync::{
         Arc,
@@ -332,12 +332,6 @@ struct Route {
     local_binding: Option<std::net::SocketAddr>,
     authorities: Vec<String>,
 }
-struct Close(Connection);
-impl Drop for Close {
-    fn drop(&mut self) {
-        self.0.close(0u32.into(), b"browser request complete");
-    }
-}
 #[derive(Debug)]
 pub(crate) struct Request {
     pub(crate) method: String,
@@ -613,24 +607,25 @@ impl Route {
                 )
                 .await;
             }
-            let target = self.client.target(self.peer).await.map_err(|_| ())?;
-            _connection = match wispnet_agent::tunnel::connect_target(&self.client.endpoint, target)
+            _connection = match self
+                .client
+                .peer_connection(self.peer, crate::connections::Protocol::Http)
                 .await
             {
-                Ok(c) => Close(c),
+                Ok(c) => c,
                 Err(_) => {
                     return response(&mut socket, "502 Bad Gateway", "Host unavailable", "").await;
                 }
             };
             match wispnet_agent::tunnel::open_service_bound(
-                &_connection.0,
+                &_connection,
                 &self.service,
                 &self.incarnation,
             )
             .await
             {
                 Ok(stream) => {
-                    self.client.record_telemetry(self.peer, &_connection.0);
+                    self.client.record_telemetry(self.peer, &_connection);
                     Box::new(stream)
                 }
                 Err(_) => {

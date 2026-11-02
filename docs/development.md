@@ -41,6 +41,32 @@ so checks cover the commit being pushed. Fresh clones must install the hook;
 Git does not enable versioned hooks automatically. GitHub Actions is not used.
 Release builds and Android checks below remain available as manual checks.
 
+The workspace pins Iroh 1.4.1 and uses the patched source in `vendor/iroh`.
+`vendor/iroh/WISPNET-PATCH.md` records the upstream archive and local changes.
+Rebase those changes onto a verified upstream crate when upgrading, update the
+Iroh/base/relay pins together, and update the Noq test pin with the transport.
+Keep a dependency upgrade separate from deliberate changes to relay policy.
+The normal suite also compiles all vendored library unit-test modules and runs
+the local patch/relay receive regressions using `scripts/test_iroh_vendor.py`.
+`scripts/test_iroh_compat.py` verifies authenticated multi-stream exchanges between
+isolated 1.3.0 and current endpoints, directly and through either relay version.
+Its previous-version dependencies are confined to fixtures under `target/`.
+
+The shared client retains bounded sessions per peer and control/HTTP protocol.
+Concurrent dials share one handshake; operations lease stream slots, with a
+five-second acquisition deadline. The pool holds at most `max_connections`
+entries and permits `max_streams_per_connection` simultaneous operations per
+session. Idle sessions expire after 30 seconds, checked every five seconds;
+capacity pressure evicts idle sessions without interrupting active ones.
+Catalog replies return without waiting for direct-path negotiation, which can
+continue on the retained session. Host authorization and service incarnation
+checks still run for every stream. Stop, explicit network changes, and unpairing
+invalidate retained sessions; application requests are never replayed.
+Shell and file transfers retain dedicated connections for independent cancellation
+and to keep bulk traffic separate from browser requests. These lifecycle changes
+do not establish a throughput or battery improvement without route-specific
+measurement.
+
 Install rustup and a Linux C toolchain. Rust 1.95.0, rustfmt and Clippy are pinned
 in rust-toolchain.toml. Direct dependencies use exact versions; Cargo.lock pins
 the resolved graph. The supported development host is x86_64 Linux.

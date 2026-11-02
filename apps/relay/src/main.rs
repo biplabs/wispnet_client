@@ -30,9 +30,40 @@ struct Config {
     acme_hostname: Option<String>,
     acme_cache: Option<PathBuf>,
     max_connections: usize,
+    #[serde(default)]
+    client_rx: ClientRxConfig,
     quic_listen: Option<SocketAddr>,
     quic_certificate: Option<PathBuf>,
     quic_private_key: Option<PathBuf>,
+}
+
+/// Ingress allowance for each relay client connection, in bytes rather than bits.
+#[derive(Debug, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct ClientRxConfig {
+    enabled: bool,
+    bytes_per_second: NonZeroU32,
+    burst_bytes: NonZeroU32,
+}
+
+impl Default for ClientRxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            bytes_per_second: NonZeroU32::new(1024 * 1024).expect("nonzero default rate"),
+            burst_bytes: NonZeroU32::new(2 * 1024 * 1024).expect("nonzero default burst"),
+        }
+    }
+}
+
+impl ClientRxConfig {
+    fn rate_limit(&self) -> Option<ClientRateLimit> {
+        self.enabled.then(|| {
+            let mut limit = ClientRateLimit::new(self.bytes_per_second);
+            limit.max_burst_bytes = Some(self.burst_bytes);
+            limit
+        })
+    }
 }
 
 fn read_protected(path: &Path, secret: bool) -> Result<Vec<u8>, &'static str> {
@@ -183,10 +214,7 @@ fn certificate_config(config: &Config) -> Result<CertConfig, &'static str> {
     Ok(result)
 }
 
-async fn serve(path: &Path) -> Result<(), &'static str> {
-    let bytes = Zeroizing::new(read_protected(path, true)?);
-    let text = std::str::from_utf8(&bytes).map_err(|_| "invalid relay configuration")?;
-    let config: Config = toml::from_str(text).map_err(|_| "invalid relay configuration")?;
+fn server_config(config: &Config) -> Result<ServerConfig, &'static str> {
     if config.listen.port() == 0 || !(1..=1024).contains(&config.max_connections) {
         return Err("invalid relay listener or connection limit");
     }
@@ -204,7 +232,7 @@ async fn serve(path: &Path) -> Result<(), &'static str> {
     let certificate_config = if config.http_only {
         None
     } else {
-        Some(certificate_config(&config)?)
+        Some(certificate_config(config)?)
     };
     // Auxiliary HTTP stays loopback-only. UDP discovery is explicitly opt-in;
     // metrics remain disabled.
@@ -222,13 +250,18 @@ async fn serve(path: &Path) -> Result<(), &'static str> {
         current: AtomicUsize::new(0),
         maximum: config.max_connections,
     });
-    let mut rate = ClientRateLimit::new(NonZeroU32::new(1024 * 1024).expect("nonzero"));
-    rate.max_burst_bytes = NonZeroU32::new(2 * 1024 * 1024);
-    relay.limits.client_rx = Some(rate);
+    relay.limits.client_rx = config.client_rx.rate_limit();
     let mut server_config = ServerConfig::default();
     server_config.relay = Some(relay);
-    server_config.quic = quic_config(&config)?;
-    let server = Server::spawn(server_config)
+    server_config.quic = quic_config(config)?;
+    Ok(server_config)
+}
+
+async fn serve(path: &Path) -> Result<(), &'static str> {
+    let bytes = Zeroizing::new(read_protected(path, true)?);
+    let text = std::str::from_utf8(&bytes).map_err(|_| "invalid relay configuration")?;
+    let config: Config = toml::from_str(text).map_err(|_| "invalid relay configuration")?;
+    let server = Server::spawn(server_config(&config)?)
         .await
         .map_err(|_| "relay listener startup failed")?;
     println!(
@@ -315,6 +348,7 @@ mod tests {
             http_only: false,
             listen: "127.0.0.1:8443".parse().unwrap(),
             max_connections: 2,
+            client_rx: ClientRxConfig::default(),
             quic_listen: None,
             quic_certificate: None,
             quic_private_key: None,
@@ -346,5 +380,63 @@ mod tests {
             certificate_config(&config).unwrap_err(),
             "invalid ACME hostname/cache"
         );
+    }
+
+    #[test]
+    fn client_ingress_defaults_and_overrides_reach_the_relay_server() {
+        let base = "listen='127.0.0.1:18443'\nhttp_only=true\nmax_connections=2\n";
+        let config: Config = toml::from_str(base).unwrap();
+        let relay = server_config(&config).unwrap().relay.unwrap();
+        let rate = relay.limits.client_rx.unwrap();
+        assert_eq!(rate.bytes_per_second.get(), 1024 * 1024);
+        assert_eq!(rate.max_burst_bytes.unwrap().get(), 2 * 1024 * 1024);
+
+        let config: Config = toml::from_str(&format!(
+            "{base}[client_rx]\nbytes_per_second=33554432\nburst_bytes=67108864\n"
+        ))
+        .unwrap();
+        let rate = server_config(&config)
+            .unwrap()
+            .relay
+            .unwrap()
+            .limits
+            .client_rx
+            .unwrap();
+        assert_eq!(rate.bytes_per_second.get(), 32 * 1024 * 1024);
+        assert_eq!(rate.max_burst_bytes.unwrap().get(), 64 * 1024 * 1024);
+
+        let config: Config =
+            toml::from_str(&format!("{base}[client_rx]\nenabled=false\n")).unwrap();
+        assert!(
+            server_config(&config)
+                .unwrap()
+                .relay
+                .unwrap()
+                .limits
+                .client_rx
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn client_ingress_rejects_invalid_values_and_misspelled_options() {
+        let base = "listen='127.0.0.1:18443'\nhttp_only=true\nmax_connections=2\n[client_rx]\n";
+        for option in [
+            "bytes_per_second=0",
+            "burst_bytes=0",
+            "bytes_per_second=-1",
+            "burst_bytes=-1",
+            "bytes_per_second=4294967296",
+            "burst_bytes=4294967296",
+            "bytes_per_second=1.5",
+            "enabled='false'",
+            "bytes_per_secon=1048576",
+            "enabled=false\nburst_bytes=0",
+        ] {
+            assert!(
+                toml::from_str::<Config>(&format!("{base}{option}\n")).is_err(),
+                "accepted invalid ingress option: {option}"
+            );
+        }
     }
 }

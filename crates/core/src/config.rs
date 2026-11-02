@@ -118,6 +118,12 @@ pub struct TransportConfig {
     /// Additional packet relays and peer bootstrap candidates. No implicit public defaults.
     #[serde(default)]
     pub backup_relay_urls: Vec<String>,
+    /// Prefer the primary packet relay, independently of standby-session retention.
+    #[serde(default = "default_relay_policy")]
+    pub prefer_primary_relay: bool,
+    /// Retain packet and discovery sessions for every configured relay.
+    #[serde(default = "default_relay_policy")]
+    pub keep_backup_relays_warm: bool,
     /// Outside-NAT QUIC discovery fallback after failed/non-public primary discovery.
     #[serde(default)]
     pub discovery_relay_url: Option<String>,
@@ -133,6 +139,9 @@ pub struct TransportConfig {
     pub max_streams: usize,
     #[serde(default = "default_per_connection")]
     pub max_streams_per_connection: usize,
+}
+fn default_relay_policy() -> bool {
+    true
 }
 fn default_connections() -> usize {
     16
@@ -630,6 +639,30 @@ unknown = 'value'",
 #[cfg(test)]
 mod backup_relay_tests {
     use super::*;
+
+    #[test]
+    fn relay_policy_defaults_preserve_existing_configs_and_accept_independent_choices() {
+        let base = "schema_version=2\nstate_dir='/tmp/wispnet'\nlog_level='info'\n[transport]\nbind_addr='0.0.0.0:0'\nrelay_url='https://home.example'\nbackup_relay_urls=['https://outside.example']\n";
+        let legacy = Config::parse(base).unwrap().transport.unwrap();
+        assert!(legacy.prefer_primary_relay);
+        assert!(legacy.keep_backup_relays_warm);
+        for prefer in [false, true] {
+            for warm in [false, true] {
+                let config = Config::parse(&format!(
+                    "{base}prefer_primary_relay={prefer}\nkeep_backup_relays_warm={warm}\n"
+                ))
+                .unwrap()
+                .transport
+                .unwrap();
+                assert_eq!(config.prefer_primary_relay, prefer);
+                assert_eq!(config.keep_backup_relays_warm, warm);
+            }
+        }
+        for invalid in ["prefer_primary_relay='false'", "keep_backup_relays_warm=0"] {
+            assert!(Config::parse(&format!("{base}{invalid}\n")).is_err());
+        }
+    }
+
     #[test]
     fn backup_relays_are_explicit_bounded_distinct_https_origins() {
         let base = "schema_version=2\nstate_dir='/tmp/wispnet'\nlog_level='info'\n[transport]\nbind_addr='0.0.0.0:0'\n";

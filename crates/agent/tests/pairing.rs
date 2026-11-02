@@ -81,6 +81,8 @@ fn invitation_files_and_targets_fail_closed_without_exposing_capabilities() {
     let invitation = pairing::read_invitation(&path).unwrap();
     let mut config = TransportConfig {
         backup_relay_urls: Vec::new(),
+        prefer_primary_relay: true,
+        keep_backup_relays_warm: true,
         discovery_relay_url: None,
         relay_url: Some("https://relay.example/".into()),
         relay_only: true,

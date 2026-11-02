@@ -3,3 +3,12 @@ listen = "0.0.0.0:8443"
 certificate = "/home/CHANGE_ME/.config/wispnet-relay/fullchain.pem"
 private_key = "/home/CHANGE_ME/.config/wispnet-relay/private-key.pem"
 max_connections = 1024
+
+# Per-connection ingress allowance, in bytes (1 MiB/s with a 2 MiB burst).
+# Omit this table to retain these defaults. Both integer values must be 1..=4294967295.
+# Raise them for faster relayed file transfers; enabled=false deliberately removes
+# the per-connection bandwidth cap. The connection-count limit still applies.
+[client_rx]
+enabled = true
+bytes_per_second = 1048576
+burst_bytes = 2097152

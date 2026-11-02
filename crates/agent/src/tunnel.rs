@@ -1042,16 +1042,19 @@ fn configured_builder(
             reports = reports.quic_discovery_fallback(observer);
         }
         if !config.backup_relay_urls.is_empty() {
-            reports = reports.keep_all_relays(true).prefer_relay(
-                config
-                    .relay_url
-                    .as_ref()
-                    .expect("validated primary")
-                    .parse()
-                    .map_err(|_| TunnelError::Transport("invalid relay URL"))?,
-                Duration::from_secs(5),
-                Duration::from_secs(30),
-            );
+            reports = reports.keep_all_relays(config.keep_backup_relays_warm);
+            if config.prefer_primary_relay {
+                reports = reports.prefer_relay(
+                    config
+                        .relay_url
+                        .as_ref()
+                        .expect("validated primary")
+                        .parse()
+                        .map_err(|_| TunnelError::Transport("invalid relay URL"))?,
+                    Duration::from_secs(5),
+                    Duration::from_secs(30),
+                );
+            }
         }
         builder = builder.net_report_config(reports);
         if let Some(path) = &config.relay_ca_file {
@@ -1224,6 +1227,10 @@ async fn open_request(
 #[cfg(test)]
 #[path = "relay_tests.rs"]
 mod relay_tests;
+
+#[cfg(test)]
+#[path = "relay_policy_tests.rs"]
+mod relay_policy_tests;
 
 #[cfg(test)]
 mod idle_tests {

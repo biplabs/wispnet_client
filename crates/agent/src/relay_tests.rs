@@ -136,6 +136,8 @@ async fn relay_dns_ip_replacement_recovers_without_endpoint_or_policy_reset() {
     let config = TransportConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         backup_relay_urls: Vec::new(),
+        prefer_primary_relay: true,
+        keep_backup_relays_warm: true,
         discovery_relay_url: None,
         relay_url: Some(format!("https://relay.test:{port}")),
         relay_only: true,
@@ -310,6 +312,8 @@ async fn relay_admission_diagnostic_is_distinct_and_redacts_server_reason() {
     let config = TransportConfig {
         bind_addr: "127.0.0.1:0".parse().unwrap(),
         backup_relay_urls: Vec::new(),
+        prefer_primary_relay: true,
+        keep_backup_relays_warm: true,
         discovery_relay_url: None,
         relay_url: Some(format!("https://{}", relay.https_addr().unwrap())),
         relay_only: true,

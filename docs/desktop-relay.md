@@ -2,7 +2,7 @@
 
 `desktop.home` temporarily hosts the standalone `wispnet-relay` binary. It is a
 separate process/systemd unit, not the desktop node's registry or transport
-endpoint. The pinned Iroh 1.3.0 server authenticates relay clients and forwards
+endpoint. The pinned Iroh 1.4.1 server authenticates relay clients and forwards
 end-to-end encrypted packets. Relay admission never approves an application
 client, grants service access, or owns a node identity.
 
@@ -43,10 +43,30 @@ The source unit is `deploy/relay/wispnet-relay.service`; systemd applies a 256 M
 memory limit, restart-on-failure and filesystem hardening. Only the protected
 ACME cache is writable inside the home directory; the relay and node configuration
 remain read-only to the service sandbox. Relay admission is
-limited to 64 authenticated connections, with 1 MiB/s incoming rate per connection
-and a 2 MiB burst. This is not a claim of pre-authentication DoS protection.
+limited to 64 authenticated connections, with a default 1 MiB/s incoming rate per
+connection and a 2 MiB burst. This is not a claim of pre-authentication DoS protection.
 Third-party payload/identity trace logging is not enabled; lifecycle logs contain
 fixed role/event labels and the listening address.
+
+The relay configuration can raise this allowance for relayed file transfers:
+
+```toml
+[client_rx]
+enabled = true
+bytes_per_second = 33554432 # 32 MiB/s per relay client connection
+burst_bytes = 67108864     # 64 MiB burst
+```
+
+Omitting the table or any field preserves its default. Rates and bursts are
+integer byte counts from 1 through 4294967295; zero, negative values and unknown
+options are rejected. Set `enabled = false` explicitly to remove the per-connection
+ingress cap. The connection-count limit remains in force. These settings limit
+traffic the relay reads from each client connection, including protocol overhead;
+they are neither a total server bandwidth budget nor a guaranteed file-transfer
+speed. Direct peer connections do not pass through this limiter. Restart only
+`wispnet-relay.service` after changing its protected configuration; this interrupts
+current relay sessions. Re-running the historical desktop-relay installer rewrites
+its configuration, so retain intentional overrides when using it.
 
 ## Network and client configuration
 

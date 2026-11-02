@@ -15,6 +15,8 @@ fn mutate(dir: &Path, host: EndpointId, op: Mutation) {
 fn config() -> TransportConfig {
     TransportConfig {
         backup_relay_urls: vec![],
+        prefer_primary_relay: true,
+        keep_backup_relays_warm: true,
         discovery_relay_url: None,
         relay_url: None,
         relay_only: false,

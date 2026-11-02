@@ -51,14 +51,15 @@ impl Fixture {
                         let Some(incoming)=incoming else {break};let responses=responses.clone();
                         tasks.spawn(async move {
                             let Ok(connection)=incoming.await else{return};
-                            let Ok((mut send,mut recv))=connection.accept_bi().await else{return};
-                            let Ok(_)=recv.read_to_end(4096).await else{return};
-                            let reply=responses.lock().await.clone();
-                            let size=reply.advertised.unwrap_or(reply.bytes.len() as u32);
-                            if send.write_all(&size.to_be_bytes()).await.is_err(){return;}
-                            if send.write_all(&reply.bytes).await.is_err(){return;}
-                            if reply.trailing {let _=send.write_all(b"x").await;}
-                            let _=send.finish();let _=send.stopped().await;
+                            while let Ok((mut send,mut recv))=connection.accept_bi().await {
+                                if recv.read_to_end(4096).await.is_err(){continue;}
+                                let reply=responses.lock().await.clone();
+                                let size=reply.advertised.unwrap_or(reply.bytes.len() as u32);
+                                if send.write_all(&size.to_be_bytes()).await.is_err(){continue;}
+                                if send.write_all(&reply.bytes).await.is_err(){continue;}
+                                if reply.trailing {let _=send.write_all(b"x").await;}
+                                let _=send.finish();let _=send.stopped().await;
+                            }
                         });
                     }
                 }

@@ -1,5 +1,6 @@
 //! Shared peer browser client. One identity/endpoint shared by pairing, catalogs and gateway.
 pub mod access_settings;
+mod connections;
 pub mod files;
 pub mod gateway;
 mod mcp;
@@ -32,6 +33,7 @@ fn runtime() -> &'static Runtime {
     })
 }
 pub struct Client {
+    connections: connections::Pool,
     shells: shell::Shells,
     files: files::Files,
     pub endpoint: Endpoint,
@@ -76,12 +78,10 @@ impl Client {
         if self.saved_host(host).await?.is_none() {
             return Err("Pair with this host first".into());
         }
-        let connection =
-            wispnet_agent::control::connect_target(&self.endpoint, self.target(host).await?)
-                .await
-                .map_err(|e| e.to_string())?;
+        let connection = self
+            .peer_connection(host, connections::Protocol::Control)
+            .await?;
         let result = wispnet_agent::control::device_id_on(&connection, host).await;
-        connection.close(0u32.into(), b"device ID read complete");
         result.map_err(|e| e.to_string())
     }
     pub(crate) async fn open_route(self: &Arc<Self>, value: &Value) -> Result<String, String> {
@@ -138,6 +138,7 @@ impl Client {
         authority: wispnet_registry::host::Authority,
     ) -> Arc<Self> {
         Arc::new(Self {
+            connections: connections::Pool::default(),
             shells: shell::Shells::default(),
             files: files::Files::default(),
             endpoint,
@@ -165,6 +166,7 @@ impl Client {
             .await
             .map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {
+            connections: connections::Pool::default(),
             shells: shell::Shells::default(),
             files: files::Files::default(),
             endpoint,
@@ -245,6 +247,7 @@ impl Client {
         .await
         .map_err(|e| e.to_string())?;
         Ok(Arc::new(Self {
+            connections: connections::Pool::default(),
             shells: shell::Shells::default(),
             files: client_files,
             endpoint: host.endpoint().clone(),
@@ -317,18 +320,13 @@ impl Client {
             tokio::task::spawn_blocking(move || wispnet_agent::catalogs::begin(&state, host))
                 .await
                 .map_err(|_| "Catalog baseline task failed")??;
-        let target = self.target(host).await?;
-        let connection = wispnet_agent::control::connect_target(&self.endpoint, target)
-            .await
-            .map_err(|e| e.to_string())?;
+        let connection = self
+            .peer_connection(host, connections::Protocol::Control)
+            .await?;
         let result = wispnet_agent::control::catalog_on(&connection, host)
             .await
             .map_err(|e| e.to_string());
-        if result.is_ok() {
-            wispnet_agent::diagnostics::settle_path(&connection).await;
-        }
         self.record_telemetry(host, &connection);
-        connection.close(0u32.into(), b"catalog complete");
         let catalog = result?;
         let state = self.state.clone();
         let accepted = catalog.clone();
@@ -371,6 +369,26 @@ impl Client {
         )
         .map_err(|e| e.to_string())
     }
+    async fn peer_connection(
+        &self,
+        host: EndpointId,
+        protocol: connections::Protocol,
+    ) -> Result<connections::Lease, String> {
+        if self.saved_host(host).await?.is_none() {
+            self.connections.forget(Some(host));
+            return Err("Pair with this host first".into());
+        }
+        self.connections
+            .get(
+                &self.endpoint,
+                host,
+                protocol,
+                self.config.max_connections,
+                self.config.max_streams_per_connection,
+                self.target(host),
+            )
+            .await
+    }
     async fn check_pairing(&self, host: EndpointId) -> Result<(), String> {
         let Some(authority) = &self.local_authority else {
             return Ok(());
@@ -405,6 +423,7 @@ impl Client {
         .await
         .map_err(|_| "Cannot apply remote removal")??;
         if removed {
+            self.connections.forget(Some(host));
             self.shells.close_host(host).await;
             self.files.cancel_host(Some(host));
             self.gateway.forget(self, host).await?;
@@ -672,6 +691,7 @@ impl Client {
                     .await
                     .map_err(|_| "Cannot remove pairing")??;
                 }
+                self.connections.forget(Some(host));
                 self.shells.close_host(host).await;
                 self.files.cancel_host(Some(host));
                 self.gateway.forget(self, host).await?;
@@ -699,14 +719,10 @@ impl Client {
                 if self.saved_host(host).await?.is_none() {
                     return Err("Pair with this host first".into());
                 }
-                let connection = wispnet_agent::control::connect_target(
-                    &self.endpoint,
-                    self.target(host).await?,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let connection = self
+                    .peer_connection(host, connections::Protocol::Control)
+                    .await?;
                 let result = wispnet_agent::control::set_name_on(&connection, host, name).await;
-                connection.close(0u32.into(), b"name update complete");
                 result.map_err(|e| e.to_string())?;
                 Ok(json!({"name":name}))
             }
@@ -722,14 +738,10 @@ impl Client {
                 if self.saved_host(host).await?.is_none() {
                     return Err("Pair with this host first".into());
                 }
-                let connection = wispnet_agent::control::connect_target(
-                    &self.endpoint,
-                    self.target(host).await?,
-                )
-                .await
-                .map_err(|e| e.to_string())?;
+                let connection = self
+                    .peer_connection(host, connections::Protocol::Control)
+                    .await?;
                 let result = wispnet_agent::control::public_links_on(&connection, host).await;
-                connection.close(0u32.into(), b"public links complete");
                 serde_json::to_value(result.map_err(|e| e.to_string())?)
                     .map_err(|_| "Invalid public links".into())
             }
@@ -817,6 +829,7 @@ impl Client {
                 Ok(json!({"enabled":true}))
             }
             "stop" => {
+                self.connections.forget(None);
                 let _guard = self.gateway.settings_lock.lock().await;
                 if let Some(host) = &self._host {
                     host.set_services_enabled(false);
@@ -832,6 +845,7 @@ impl Client {
                 self.files.cancel_host(None);
                 let _guard = self.gateway.settings_lock.lock().await;
                 let interrupted = self.gateway.interrupt().await;
+                self.connections.forget(None);
                 self.endpoint.network_change().await;
                 if self.gateway.is_enabled() {
                     self.gateway.restore(self.clone()).await?;
@@ -852,6 +866,8 @@ fn app_transport_config(value: &Value) -> Result<TransportConfig, String> {
         "relay_url": argument(value, "relay")?,
         "discovery_relay_url": value.get("discovery_relay"),
         "backup_relay_urls": value.get("backup_relays").cloned().unwrap_or_else(|| json!([])),
+        "prefer_primary_relay": value.get("prefer_primary_relay").cloned().unwrap_or(json!(true)),
+        "keep_backup_relays_warm": value.get("keep_backup_relays_warm").cloned().unwrap_or(json!(true)),
         "relay_only": false,
     }))
     .map_err(|_| "Invalid relay")?;
