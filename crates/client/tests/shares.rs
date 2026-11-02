@@ -387,3 +387,255 @@ async fn download_resume_rejects_source_changes_and_never_follows_destinations()
     .await
     .unwrap();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn folder_download_preserves_tree_and_resumes_across_client_restart() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let state = tempfile::tempdir().unwrap();
+        let shared = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let key = SecretKey::generate();
+        let run = shared.path().join("run-1");
+        std::fs::create_dir_all(run.join("nested/empty")).unwrap();
+        source(&run.join("a-checkpoint.bin"));
+        std::fs::write(run.join("nested/模型.json"), b"{\"epoch\":10}").unwrap();
+        for i in 0..40 {
+            std::fs::write(
+                run.join(format!("metadata-{i:02}.txt")),
+                format!("record {i}"),
+            )
+            .unwrap();
+        }
+        let target = configure(state.path(), shared.path(), &key, None).await;
+        let client = Client::new_peer(key.clone(), state.path().to_owned(), transport())
+            .await
+            .unwrap();
+        let output = dest.path().join("downloaded-run");
+        assert_eq!(
+            client
+                .get_folder(target.clone(), "run-1", &output, pause())
+                .await
+                .unwrap_err()
+                .code,
+            "CANCELLED"
+        );
+        assert!(
+            !output.exists(),
+            "partial folder must stay private until verified"
+        );
+        client.endpoint.close().await;
+        drop(client);
+        let client = Client::new_peer(key, state.path().to_owned(), transport())
+            .await
+            .unwrap();
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let recorded = seen.clone();
+        let folder = client
+            .get_folder(
+                target.clone(),
+                "run-1",
+                &output,
+                TransferOptions {
+                    progress: Some(Arc::new(move |p| {
+                        if p.phase == "transferring" {
+                            recorded.lock().unwrap().push(p.verified_bytes);
+                        }
+                    })),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(folder.files_total, 42);
+        assert_eq!(seen.lock().unwrap()[0], wispnet_files::MAX_CHUNK as u64);
+        assert_eq!(
+            std::fs::read(output.join("a-checkpoint.bin")).unwrap(),
+            std::fs::read(run.join("a-checkpoint.bin")).unwrap()
+        );
+        assert!(output.join("nested/empty").is_dir());
+        assert_eq!(
+            std::fs::read(output.join("nested/模型.json")).unwrap(),
+            b"{\"epoch\":10}"
+        );
+        assert_eq!(
+            std::fs::read(output.join("metadata-39.txt")).unwrap(),
+            b"record 39"
+        );
+        // A retained receipt recognizes our completed directory and never
+        // substitutes an unrelated pre-existing destination.
+        client
+            .get_folder(target.clone(), "run-1", &output, TransferOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            client
+                .get_folder(
+                    target.clone(),
+                    "run-1",
+                    &output,
+                    TransferOptions {
+                        resume: false,
+                        ..Default::default()
+                    }
+                )
+                .await
+                .unwrap_err()
+                .code,
+            "CONFLICT"
+        );
+        let root_output = dest.path().join("whole-share");
+        client
+            .get_folder(target, "", &root_output, TransferOptions::default())
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(root_output.join("run-1/metadata-00.txt")).unwrap(),
+            b"record 0"
+        );
+        client.endpoint.close().await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn folder_resume_rejects_changed_membership_and_versions_without_overwriting() {
+    tokio::time::timeout(Duration::from_secs(60), async {
+        let state = tempfile::tempdir().unwrap();
+        let shared = tempfile::tempdir().unwrap();
+        let dest = tempfile::tempdir().unwrap();
+        let key = SecretKey::generate();
+        source(&shared.path().join("a-checkpoint.bin"));
+        std::fs::write(shared.path().join("z-config.json"), b"original").unwrap();
+        let target = configure(state.path(), shared.path(), &key, None).await;
+        let client = Client::new_peer(key, state.path().to_owned(), transport())
+            .await
+            .unwrap();
+        let output = dest.path().join("run");
+        assert_eq!(
+            client
+                .get_folder(target.clone(), "", &output, pause())
+                .await
+                .unwrap_err()
+                .code,
+            "CANCELLED"
+        );
+        std::fs::write(shared.path().join("new.txt"), b"new member").unwrap();
+        assert_eq!(
+            client
+                .get_folder(target.clone(), "", &output, TransferOptions::default())
+                .await
+                .unwrap_err()
+                .code,
+            "STALE_VERSION"
+        );
+        assert!(!output.exists());
+        client
+            .get_folder(
+                target.clone(),
+                "",
+                &output,
+                TransferOptions {
+                    resume: false,
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            std::fs::read(output.join("new.txt")).unwrap(),
+            b"new member"
+        );
+        let changed = shared.path().join("z-config.json");
+        let once = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let change_once = once.clone();
+        let failed = dest.path().join("changing");
+        let error = client
+            .get_folder(
+                target.clone(),
+                "",
+                &failed,
+                TransferOptions {
+                    progress: Some(Arc::new(move |p| {
+                        if p.phase == "transferring"
+                            && p.verified_bytes > 0
+                            && !change_once.swap(true, std::sync::atomic::Ordering::SeqCst)
+                        {
+                            std::fs::write(&changed, b"modified").unwrap();
+                        }
+                    })),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.code, "STALE_VERSION");
+        assert!(!failed.exists());
+        assert_eq!(
+            std::fs::read(output.join("z-config.json")).unwrap(),
+            b"original"
+        );
+        let victim = dest.path().join("victim");
+        std::fs::create_dir(&victim).unwrap();
+        std::fs::write(victim.join("keep"), b"keep").unwrap();
+        let symlink = dest.path().join("link");
+        std::os::unix::fs::symlink(&victim, &symlink).unwrap();
+        assert_eq!(
+            client
+                .get_folder(target, "", &symlink, TransferOptions::default())
+                .await
+                .unwrap_err()
+                .code,
+            "CONFLICT"
+        );
+        assert_eq!(std::fs::read(victim.join("keep")).unwrap(), b"keep");
+        client.endpoint.close().await;
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn owner_stat_and_expected_version_pin_download_before_publication() {
+    let state = tempfile::tempdir().unwrap();
+    let shared = tempfile::tempdir().unwrap();
+    let dest = tempfile::tempdir().unwrap();
+    let key = SecretKey::generate();
+    std::fs::write(shared.path().join("config.json"), b"original").unwrap();
+    let target = configure(state.path(), shared.path(), &key, None).await;
+    let client = Client::new_peer(key, state.path().to_owned(), transport())
+        .await
+        .unwrap();
+    let inspected = client.command(&json!({"op":"file_stat","host":target.host,"service":target.service,"incarnation":target.incarnation,"path":"config.json"})).await.unwrap();
+    let info = loop {
+        let status = client
+            .command(&json!({"op":"file_status","transfer":inspected["transfer"]}))
+            .await
+            .unwrap();
+        if status["state"] == "running" {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            continue;
+        }
+        assert_eq!(status["state"], "complete");
+        break status["file"].clone();
+    };
+    assert_eq!(info["size_bytes"], 8);
+    std::fs::write(shared.path().join("config.json"), b"changed").unwrap();
+    let started = client.command(&json!({"op":"file_get","host":target.host,"service":target.service,"incarnation":target.incarnation,"path":"config.json","expected_version":info["file_version"],"local_path":dest.path().join("config.json")})).await.unwrap();
+    let handle = started["transfer"].clone();
+    loop {
+        let status = client
+            .command(&json!({"op":"file_status","transfer":handle}))
+            .await
+            .unwrap();
+        if status["state"] == "running" {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            continue;
+        }
+        assert_eq!(status["state"], "failed");
+        assert_eq!(status["error"]["code"], "STALE_VERSION");
+        break;
+    }
+    assert!(!dest.path().join("config.json").exists());
+    client.endpoint.close().await;
+}

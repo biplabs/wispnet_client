@@ -2,9 +2,11 @@
 //! the host's configured folders, never reading files from them.
 //! Peer authentication, grants and active
 //! revocation are enforced by Wispnet before and during `FileService::serve`.
+mod compression;
 mod protocol;
 mod server;
 mod share;
+pub use compression::{AdaptiveEncoder, decode_data_response};
 pub use protocol::*;
 pub use server::{FileService, Limits, Publication, Publisher};
 pub use share::ShareSource;

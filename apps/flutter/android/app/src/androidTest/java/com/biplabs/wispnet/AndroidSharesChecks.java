@@ -76,6 +76,24 @@ final class AndroidSharesChecks {
    JSONObject cancelled = decode(source.request(new JSONObject(), () -> true));
    require("UNAVAILABLE".equals(cancelled.optString("code")), "Cancellation ignored by SAF adapter");
    checks.put("SAF traversal rejection and immediate cancellation");
+   JSONObject sourceRequest = new JSONObject().put("root", folder.getString("folder"));
+   JSONObject pinned = decode(source.request(sourceRequest.put("request",
+       new JSONObject().put("op", "share_stat").put("path", "model.bin")), () -> false)).getJSONObject("file");
+   for (int index = 0; index < 140; index++) {
+    JSONObject metadata = decode(source.request(sourceRequest.put("request", new JSONObject().put("op", "share_stat")
+        .put("path", String.format(java.util.Locale.ROOT, "page-%02d.txt", index))), () -> false));
+    require("file".equals(metadata.optString("type")), "Source cache fixture failed to pin metadata");
+   }
+   byte[] refreshed = source.request(sourceRequest.put("request", new JSONObject().put("op", "share_read_range")
+       .put("path", "model.bin").put("expected_version", pinned.getString("file_version")).put("offset", 0).put("max_bytes", 64)), () -> false);
+   require("data".equals(decode(refreshed).optString("type")), "Evicted manifest file could not rebuild its pinned source version");
+   ByteBuffer refreshedBytes = ByteBuffer.wrap(refreshed); int metadataSize = refreshedBytes.getInt(), payloadSize = refreshedBytes.getInt();
+   require(payloadSize == 64, "Rebuilt source version returned the wrong range length");
+   for (int index = 0; index < payloadSize; index++) require((refreshed[8 + metadataSize + index] & 255) == index, "Rebuilt source version changed bytes");
+   JSONObject wrong = decode(source.request(sourceRequest.put("request", new JSONObject().put("op", "share_read_range")
+       .put("path", "model.bin").put("expected_version", "0".repeat(64)).put("offset", 0).put("max_bytes", 64)), () -> false));
+   require("STALE_VERSION".equals(wrong.optString("code")), "Source cache refresh accepted another file version");
+   checks.put("folder manifests exceeding the bounded source version cache refresh exact pinned versions without changing bytes");
    JSONObject snapshot = request("snapshot", new JSONObject()); String peer = snapshot.getString("peer");
    JSONArray local = snapshot.getJSONObject("hosts").getJSONObject(peer).getJSONObject("catalog").getJSONArray("services");
    boolean localShare = false; for (int n=0; n<local.length(); n++) if ("checkpoints".equals(local.getJSONObject(n).optString("id"))) localShare = true;

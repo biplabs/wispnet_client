@@ -407,8 +407,14 @@ class Bridge:
         resume = args.get('resume', True)
         if type(resume) is not bool:
             raise ValueError('Resume must be true or false')
+        recursive = args.get('recursive', False)
+        if type(recursive) is not bool:
+            raise ValueError('Recursive must be true or false')
+        if not path and not recursive:
+            raise ValueError('Choose a file or download the whole folder')
         return self.api.request(op='file_get', **target, path=path,
-                                local_path=destination, resume=resume)
+                                local_path=destination, resume=resume,
+                                **({'recursive': True} if recursive else {}))
 
     def dispatch(self, method, args):
         if method == 'startDesktop':

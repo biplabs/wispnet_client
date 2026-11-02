@@ -67,7 +67,9 @@ def main():
         files = {'model.bin': bytes(range(256)) * 20480 + b'SAF checkpoint',
                  'nested/資料😀.bin': 'Unicode checkpoint 資料 😀'.encode(),
                  'empty.bin': b''}
-        for index in range(40):
+        # Exceed the source adapter's bounded version cache so folder manifests
+        # exercise lazy rebuilding of an evicted, still-pinned file version.
+        for index in range(140):
             files[f'page-{index:02}.txt'] = f'entry {index}\n'.encode()
         for path, content in files.items():
             local = temporary / ('fixture-' + hashlib.sha256(path.encode()).hexdigest())
@@ -140,7 +142,7 @@ def main():
                                 root = cli('files', 'ls', peer, 'checkpoints')
                                 pages = [json.loads(line) for line in root.stdout.splitlines()]
                                 entries = [entry for page in pages for entry in page['entries']]
-                                if len(pages) < 2 or len(entries) != 43:
+                                if len(pages) < 2 or len(entries) != len({path.split('/')[0] for path in files}):
                                     raise AssertionError('Bounded folder pagination lost source entries')
                                 nested = json.loads(cli('files', 'ls', peer, 'checkpoints', 'nested').stdout)
                                 if nested['entries'][0]['path'] != 'nested/資料😀.bin':

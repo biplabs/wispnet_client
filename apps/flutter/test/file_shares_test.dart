@@ -243,7 +243,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.text(
-          'Read-only share. Choose files to download to this device. Inbox access is separate.',
+          'Read-only share. Choose files or folders to download to this device. Inbox access is separate.',
         ),
         findsOneWidget,
       );
@@ -521,6 +521,96 @@ void main() {
       await downloads.poll();
     },
   );
+
+  for (final desktop in [true, false]) {
+    testWidgets(
+      '${desktop ? 'desktop' : 'Android'} downloads a folder with one destination choice and aggregate progress',
+      (tester) async {
+        final backend = ShareBackend()
+          ..selectedFolder = desktop ? '/chosen' : 'content://downloads/tree'
+          ..status = {
+            'transfer': 'c' * 64,
+            'state': 'running',
+            'phase': 'transferring',
+            'recursive': true,
+            'verified_bytes': 1024,
+            'size_bytes': 2048,
+            'files_complete': 1,
+            'files_total': 2,
+          };
+        final downloads = SharedFileDownloads(backend);
+        addTearDown(downloads.dispose);
+        await browser(tester, backend, downloads, desktop: desktop);
+        await tester.tap(find.byTooltip('Download folder run-1'));
+        await tester.pump();
+        final request = backend.calls
+            .where((c) => c.$1 == 'shareGet')
+            .single
+            .$2;
+        expect(request['path'], 'run-1');
+        expect(request['recursive'], isTrue);
+        expect(
+          request['local_path'],
+          desktop ? '/chosen/run-1' : 'content://downloads/tree',
+        );
+        expect(request['name'], 'run-1');
+        expect(find.text('1 / 2 files'), findsOneWidget);
+        expect(find.text('Cancel download'), findsOneWidget);
+        expect(
+          backend.calls.where((c) => c.$1.startsWith('pick')),
+          hasLength(1),
+        );
+
+        // The folder batch remains native when the browser closes, and resume
+        // reuses the entire request instead of asking for each child's path.
+        await tester.pumpWidget(const SizedBox());
+        backend.status = {...backend.status, 'state': 'cancelled'};
+        await downloads.poll();
+        await browser(tester, backend, downloads, desktop: desktop);
+        await tester.ensureVisible(find.text('Resume download'));
+        await tester.tap(find.text('Resume download'));
+        await tester.pump();
+        final requests = backend.calls
+            .where((c) => c.$1 == 'shareGet')
+            .toList();
+        expect(requests, hasLength(2));
+        expect(requests.last.$2, requests.first.$2);
+        expect(
+          backend.calls.where((c) => c.$1.startsWith('pick')),
+          hasLength(1),
+        );
+        backend.status = {...backend.status, 'state': 'complete'};
+        await downloads.poll();
+      },
+    );
+  }
+
+  testWidgets('download this folder uses the current path or the share root', (
+    tester,
+  ) async {
+    final backend = ShareBackend();
+    final downloads = SharedFileDownloads(backend);
+    addTearDown(downloads.dispose);
+    await browser(tester, backend, downloads);
+    await tester.tap(find.byTooltip('Download this folder'));
+    await tester.pump();
+    var request = backend.calls.where((c) => c.$1 == 'shareGet').last.$2;
+    expect(request['path'], '');
+    expect(request['local_path'], '/chosen/checkpoints');
+    expect(request['name'], 'checkpoints');
+    expect(request['recursive'], isTrue);
+    backend.status = {...backend.status, 'state': 'complete'};
+    await downloads.poll();
+    await tester.tap(find.text('run-1').first);
+    await tester.pump();
+    await tester.tap(find.byTooltip('Download this folder'));
+    await tester.pump();
+    request = backend.calls.where((c) => c.$1 == 'shareGet').last.$2;
+    expect(request['path'], 'run-1');
+    expect(request['local_path'], '/chosen/run-1');
+    expect(request['recursive'], isTrue);
+    await downloads.poll();
+  });
 
   testWidgets('cancelling a destination picker never starts a download', (
     tester,

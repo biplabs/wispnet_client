@@ -88,6 +88,7 @@ final class AndroidReceivingChecks {
    }
    checks.put("background desktop-to-Android QUIC upload, Unicode subfolder and zero-byte file verified through SAF");
    checks.put("lost-response retry is idempotent and destination conflict preserves existing bytes");
+   folderDownloadPublication(context, tree, folderName, folder.getString("folder"));
    request("setAccess", new JSONObject().put("enabled", false));
    signal("offline", peer); require(await("offline").getBoolean("success"), "Offline receiver accepted a file");
    request("setAccess", new JSONObject().put("enabled", true));
@@ -103,6 +104,49 @@ final class AndroidReceivingChecks {
    try { report.put("success", false).put("error", failure.toString()).put("checks", checks); } catch (Exception ignored) {}
    test.finish(Activity.RESULT_CANCELED, save(report, result));
   } finally { if (bridge != null) bridge.close(); }
+ }
+ private void folderDownloadPublication(Context context, Uri tree, String folderName, String root) throws Exception {
+  AndroidReceiving receiving = new AndroidReceiving(context);
+  String claim = digest("folder-download-owner:" + root), name = "downloaded-checkpoint";
+  receiving.claimDownloadDirectory(root, name, claim, () -> false);
+  receiving.claimDownloadDirectory(root, name, claim, () -> false);
+  boolean collision = false;
+  try { receiving.claimDownloadDirectory(root, name, digest("other-owner:" + root), () -> false); }
+  catch (Native.Failure expected) { collision = "CONFLICT".equals(expected.code); }
+  require(collision, "Folder download merged into another operation's destination");
+  receiving.downloadDirectory(root, name + "/empty", () -> false);
+  Uri empty = DocumentsContract.buildDocumentUriUsingTree(tree, "primary:Documents/" + folderName + "/" + name + "/empty");
+  try (android.database.Cursor cursor = context.getContentResolver().query(empty,
+      new String[]{DocumentsContract.Document.COLUMN_MIME_TYPE}, null, null, null)) {
+   require(cursor != null && cursor.moveToFirst() && DocumentsContract.Document.MIME_TYPE_DIR.equals(cursor.getString(0)),
+       "Empty downloaded folder was lost");
+  }
+  byte[] bytes = "lossless checkpoint 資料 😀".getBytes(StandardCharsets.UTF_8);
+  String hash = java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+  JSONObject publication = new JSONObject().put("transfer", digest("folder-download-file:" + root)).put("root", root)
+      .put("path", name + "/nested/資料.bin").put("sha256", hash).put("size_bytes", bytes.length);
+  File staged = new File(context.getCacheDir(), "folder-publication-fixture");
+  try {
+   try (FileOutputStream output = new FileOutputStream(staged)) { output.write(bytes); }
+   try (android.os.ParcelFileDescriptor source = android.os.ParcelFileDescriptor.open(staged, android.os.ParcelFileDescriptor.MODE_READ_ONLY)) {
+    require("ok".equals(receiving.publish(publication, source.getFd(), () -> false)), "Folder child publication failed");
+   }
+   require(receiving.downloadPublished(publication, () -> false), "Verified completed child was not resumable");
+   Uri child = DocumentsContract.buildDocumentUriUsingTree(tree,
+       "primary:Documents/" + folderName + "/" + name + "/nested/資料.bin");
+   byte[] changed = bytes.clone(); changed[0] ^= 1;
+   try (java.io.OutputStream output = context.getContentResolver().openOutputStream(child, "wt")) {
+    require(output != null, "Cannot modify isolated publication fixture"); output.write(changed);
+   }
+   boolean modified = false;
+   try { receiving.downloadPublished(publication, () -> false); }
+   catch (Native.Failure expected) { modified = "CONFLICT".equals(expected.code); }
+   require(modified, "Folder resume trusted a modified provider file with the same length");
+  } finally { staged.delete(); }
+  checks.put("folder download owns its destination, preserves empty directories and verifies completed SAF children before resume");
+ }
+ private static String digest(String value) throws Exception {
+  return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));
  }
  private JSONObject request(String method, JSONObject args) throws Exception { return bridge.request(method, args); }
  private void signal(String phase, String peer) throws Exception {

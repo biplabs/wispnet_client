@@ -282,6 +282,7 @@ fn read(
 }
 fn validate_request(request: &Request) -> Result<()> {
     match request {
+        Request::ShareCapabilities => {}
         Request::ShareList { path, cursor } => {
             parts(path)?;
             if let Some(cursor) = cursor
@@ -296,6 +297,12 @@ fn validate_request(request: &Request) -> Result<()> {
             }
         }
         Request::ShareReadRange {
+            path,
+            expected_version,
+            max_bytes,
+            ..
+        }
+        | Request::ShareReadRangeEncoded {
             path,
             expected_version,
             max_bytes,
@@ -400,6 +407,28 @@ fn dispatch(
     if cancel.load(Ordering::Acquire) {
         return Err(ErrorCode::Unavailable);
     }
+    if matches!(request, Request::ShareCapabilities) {
+        return Ok(Response::ShareCapabilities {
+            encodings: vec!["zstd".into()],
+        });
+    }
+    // Platform storage adapters need no codec knowledge. They see only the
+    // already-supported bounded raw read operation; encoding happens after
+    // validating their response, inside the native blocking worker.
+    let request = match request {
+        Request::ShareReadRangeEncoded {
+            path,
+            expected_version,
+            offset,
+            max_bytes,
+        } => Request::ShareReadRange {
+            path,
+            expected_version,
+            offset,
+            max_bytes,
+        },
+        other => other,
+    };
     if let Some(source) = publisher.and_then(|publisher| publisher.share_source()) {
         // The native path is an owner-selected private marker directory only.
         // Its contents are never used as a fallback for an unknown capability.
@@ -459,6 +488,7 @@ pub(super) async fn serve(
         Ok(())
     };
     let process = async {
+        let mut encoder = crate::AdaptiveEncoder::default();
         while let Some(request) = receiver.recv().await {
             let permit = bulk
                 .clone()
@@ -468,23 +498,45 @@ pub(super) async fn serve(
             let root = root.clone();
             let cancel = cancel.clone();
             let publisher = publisher.clone();
-            let response = tokio::task::spawn_blocking(move || {
+            let (response, returned_encoder) = tokio::task::spawn_blocking(move || {
                 let _permit = permit;
-                dispatch(&root, request, cancel, publisher.as_deref())
+                let source = match &request {
+                    Request::ShareReadRangeEncoded {
+                        path,
+                        expected_version,
+                        ..
+                    } => Some(format!("{path}\0{expected_version}")),
+                    _ => None,
+                };
+                let response =
+                    dispatch(&root, request, cancel, publisher.as_deref()).map(|response| {
+                        match source {
+                            Some(source) => encoder.encode(&source, response),
+                            None => response,
+                        }
+                    });
+                (response, encoder)
             })
             .await
             .map_err(|_| io::Error::other("File share unavailable"))?;
+            encoder = returned_encoder;
             let response = response.unwrap_or_else(|code| Response::Error {
                 code,
                 message: "File share request failed".into(),
                 expected_offset: None,
             });
+            let payload_bytes = match &response {
+                Response::Data { data, .. } | Response::EncodedData { data, .. } => data.len(),
+                _ => 0,
+            };
+            let write_started = std::time::Instant::now();
             tokio::time::timeout(
                 Duration::from_secs(300),
                 write_response(&mut writer, &response),
             )
             .await
             .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "File share write timeout"))??;
+            encoder.observe_write(payload_bytes, write_started.elapsed());
             outstanding.fetch_sub(1, Ordering::AcqRel);
         }
         Ok::<(), io::Error>(())
@@ -634,6 +686,59 @@ mod tests {
         }
         assert_eq!(names.len(), 79);
         assert!(names.windows(2).all(|pair| pair[0] < pair[1]));
+    }
+    #[tokio::test]
+    async fn share_compression_is_explicit_and_keeps_legacy_ranges_raw() {
+        let root = tempfile::tempdir().unwrap();
+        let state = tempfile::tempdir().unwrap();
+        let bytes = vec![b'x'; 256 * 1024];
+        fs::write(root.path().join("model"), &bytes).unwrap();
+        let file = info(root.path(), "model");
+        let service = FileService::new(state.path().into()).unwrap();
+        let (mut client, server) = tokio::io::duplex(MAX_CHUNK * 2);
+        let (reader, writer) = tokio::io::split(server);
+        let path = root.path().to_owned();
+        let task = tokio::spawn(async move {
+            service
+                .serve_share("peer", "inc", path, reader, writer)
+                .await
+                .unwrap();
+        });
+        write_request(&mut client, &Request::ShareCapabilities)
+            .await
+            .unwrap();
+        assert!(
+            matches!(read_response(&mut client).await.unwrap(), Some(Response::ShareCapabilities { encodings }) if encodings == ["zstd"])
+        );
+        for encoded in [true, false] {
+            let request = if encoded {
+                Request::ShareReadRangeEncoded {
+                    path: "model".into(),
+                    expected_version: file.file_version.clone(),
+                    offset: 0,
+                    max_bytes: bytes.len() as u64,
+                }
+            } else {
+                Request::ShareReadRange {
+                    path: "model".into(),
+                    expected_version: file.file_version.clone(),
+                    offset: 0,
+                    max_bytes: bytes.len() as u64,
+                }
+            };
+            write_request(&mut client, &request).await.unwrap();
+            let response = read_response(&mut client).await.unwrap().unwrap();
+            assert_eq!(matches!(response, Response::EncodedData { .. }), encoded);
+            assert_eq!(
+                crate::decode_data_response(response).unwrap(),
+                Response::Data {
+                    offset: 0,
+                    data: bytes.clone()
+                }
+            );
+        }
+        drop(client);
+        task.await.unwrap();
     }
     #[tokio::test]
     async fn binary_share_stream_reads_but_cannot_upload() {
@@ -838,6 +943,9 @@ mod provider_tests {
         );
         assert!(
             matches!(dispatch(&marker,Request::ShareReadRange { path:"remote.pt".into(),expected_version:"provider-version".into(),offset:1,max_bytes:3 },cancel.clone(),Some(&provider)).unwrap(),Response::Data { offset:1,data } if data==b"eig")
+        );
+        assert!(
+            matches!(dispatch(&marker,Request::ShareReadRangeEncoded { path:"remote.pt".into(),expected_version:"provider-version".into(),offset:1,max_bytes:3 },cancel.clone(),Some(&provider)).unwrap(),Response::Data { offset:1,data } if data==b"eig")
         );
         assert_eq!(
             dispatch(

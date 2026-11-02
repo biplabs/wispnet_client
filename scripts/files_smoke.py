@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import subprocess
+import time
 import unittest
 
 import shell_smoke
@@ -105,6 +106,16 @@ class FilesSmoke(unittest.TestCase):
         self.assertEqual([(s["id"], s["kind"]) for s in catalog["services"]],
                          [("checkpoints", "file_share")])
         self.assertNotIn(str(source), json.dumps(catalog))
+        service = catalog['services'][0]
+        inspection = api.request(op='file_stat', host=target_id, service='checkpoints',
+                                 incarnation=service['incarnation'], path='run-1/model.bin')
+        self.assertIn('transfer', inspection)
+        deadline = time.monotonic() + 10
+        while inspection['state'] == 'running' and time.monotonic() < deadline:
+            time.sleep(.02)
+            inspection = api.request(op='file_status', transfer=inspection['transfer'])
+        self.assertEqual(inspection['state'], 'complete', inspection)
+        self.assertEqual(inspection['file']['sha256'], hashlib.sha256(content).hexdigest())
         listed = json.loads(self.cli(client, "files", "ls", target_id, "checkpoints").stdout)
         self.assertEqual([(e["name"], e["is_dir"]) for e in listed["entries"]], [("run-1", True)])
         listed = json.loads(self.cli(client, "files", "ls", target_id, "checkpoints", "run-1").stdout)
@@ -113,6 +124,34 @@ class FilesSmoke(unittest.TestCase):
         downloaded = self.cli(client, "files", "get", target_id, "checkpoints", "run-1/model.bin", str(destination))
         self.completed(downloaded, hashlib.sha256(content).hexdigest(), len(content))
         self.assertEqual(destination.read_bytes(), content)
+        # A folder uses one native background job, including paginated children,
+        # empty directories and original Unicode names. It creates no archives
+        # in the source share and resumes a completed destination idempotently.
+        (source / 'run-1' / 'empty-directory').mkdir()
+        (source / 'run-1' / 'nested').mkdir()
+        small_files = {f'page-{index:02}.json':
+                       (json.dumps({'step': index, 'status': 'checkpoint ready'}) + '\n').encode() * 100
+                       for index in range(40)}
+        small_files['nested/資料😀.txt'] = 'checkpoint 資料 😀\n'.encode() * 100
+        small_files['empty.bin'] = b''
+        for path, data in small_files.items():
+            (source / 'run-1' / path).write_bytes(data)
+        folder = self.root / 'downloaded-checkpoint'
+        result = self.cli(client, 'files', 'get', target_id, 'checkpoints', 'run-1',
+                          folder, '--recursive')
+        complete = json.loads(result.stdout)
+        self.assertEqual(complete['state'], 'complete', complete)
+        self.assertEqual(complete['files_total'], len(small_files) + 1)
+        self.assertEqual(complete['files_complete'], len(small_files) + 1)
+        self.assertEqual(complete['verified_bytes'], len(content) + sum(map(len, small_files.values())))
+        self.assertEqual((folder / 'model.bin').read_bytes(), content)
+        self.assertTrue((folder / 'empty-directory').is_dir())
+        for path, data in small_files.items():
+            self.assertEqual((folder / path).read_bytes(), data)
+        retry = json.loads(self.cli(client, 'files', 'get', target_id, 'checkpoints',
+                                   'run-1', folder, '--recursive').stdout)
+        self.assertEqual(retry['state'], 'complete', retry)
+        self.assertFalse(list(source.rglob('*.zip')))
         self.assertEqual(json.loads(self.cli(target, "files-access").stdout), inbox_before)
         self.assertEqual(json.loads(self.cli(client, "files-access").stdout), receiver_before)
         denied = self.cli(client, "files", "ls", target_id, "private", success=False)

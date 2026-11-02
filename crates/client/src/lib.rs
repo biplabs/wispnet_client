@@ -417,7 +417,7 @@ impl Client {
             "local_owner_status" | "local_owner_mutate" | "local_owner_invite"
             | "local_owner_apply" => owner::command(self, value).await,
             "file_workspaces" | "file_put" | "file_status" | "file_cancel" | "file_list"
-            | "file_get" => self.files_command(value).await,
+            | "file_get" | "file_stat" => self.files_command(value).await,
             "shell_open" => self.shell_open(value).await,
             "shell_input" | "shell_resize" | "shell_poll" | "shell_close" => {
                 self.shells.command(value).await

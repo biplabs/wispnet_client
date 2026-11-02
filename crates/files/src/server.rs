@@ -1265,7 +1265,9 @@ impl FileService {
             | Request::FileReadRange { .. }
             | Request::ShareList { .. }
             | Request::ShareStat { .. }
-            | Request::ShareReadRange { .. } => Err(fail(ErrorCode::PermissionDenied)),
+            | Request::ShareReadRange { .. }
+            | Request::ShareReadRangeEncoded { .. }
+            | Request::ShareCapabilities => Err(fail(ErrorCode::PermissionDenied)),
         }
     }
 }
@@ -2150,6 +2152,10 @@ mod tests {
         else {
             panic!("upload commit failed");
         };
+        error(
+            f.call(Request::ShareCapabilities).await,
+            ErrorCode::PermissionDenied,
+        );
         for path in ["private", "uploaded", "missing", "../outside/secret"] {
             for request in [
                 Request::ShareList {
@@ -2158,6 +2164,12 @@ mod tests {
                 },
                 Request::ShareStat { path: path.into() },
                 Request::ShareReadRange {
+                    path: path.into(),
+                    expected_version: file.file_version.clone(),
+                    offset: 0,
+                    max_bytes: 1,
+                },
+                Request::ShareReadRangeEncoded {
                     path: path.into(),
                     expected_version: file.file_version.clone(),
                     offset: 0,

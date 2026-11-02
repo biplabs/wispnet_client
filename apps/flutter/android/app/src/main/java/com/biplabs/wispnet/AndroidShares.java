@@ -213,6 +213,13 @@ final class AndroidShares {
   if (offset < 0 || maximum < 1 || maximum > MAX_CHUNK) throw new Failure("INVALID_ARGUMENT");
   Version version;
   synchronized (VERSIONS) { version = VERSIONS.get(root + "\n" + path); }
+  // A folder manifest can pin more files than this bounded provider cache holds.
+  // Rebuild an evicted entry using the same cancellable, full-content stat; the
+  // exact caller-pinned version still has to match before any bytes are sent.
+  if (version == null) {
+   stat(root, tree, path, operation);
+   synchronized (VERSIONS) { version = VERSIONS.get(root + "\n" + path); }
+  }
   Row before = resolve(tree, path, operation);
   if (version == null || !version.value.equals(request.getString("expected_version")) || !version.row.same(before)) throw new Failure("STALE_VERSION");
   if (offset > version.size) throw new Failure("INVALID_OFFSET");

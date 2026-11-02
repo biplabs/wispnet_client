@@ -87,7 +87,18 @@ pub enum Request {
     ShareStat {
         path: String,
     },
+    /// Probe before requesting encoded ranges. Old peers may close the stream
+    /// on this unknown operation; clients then reconnect using raw ranges.
+    ShareCapabilities,
     ShareReadRange {
+        path: String,
+        expected_version: String,
+        offset: u64,
+        max_bytes: u64,
+    },
+    /// Explicit permission to return independently compressed zstd chunks.
+    /// Offsets and lengths always refer to the original, uncompressed file.
+    ShareReadRangeEncoded {
         path: String,
         expected_version: String,
         offset: u64,
@@ -136,6 +147,16 @@ pub enum Response {
     },
     Data {
         offset: u64,
+        #[serde(skip)]
+        data: Vec<u8>,
+    },
+    ShareCapabilities {
+        encodings: Vec<String>,
+    },
+    EncodedData {
+        offset: u64,
+        decoded_bytes: u64,
+        encoding: String,
         #[serde(skip)]
         data: Vec<u8>,
     },
@@ -221,7 +242,9 @@ pub async fn read_response(reader: &mut (impl AsyncRead + Unpin)) -> io::Result<
         return Ok(None);
     };
     let mut response = serde_json::from_slice(&metadata).map_err(|_| invalid())?;
-    if let Response::Data { data: target, .. } = &mut response {
+    if let Response::Data { data: target, .. } | Response::EncodedData { data: target, .. } =
+        &mut response
+    {
         *target = data;
     } else if !data.is_empty() {
         return Err(invalid());
@@ -247,7 +270,9 @@ pub fn decode_response_frame(frame: &[u8]) -> io::Result<Response> {
     let mut response =
         serde_json::from_slice(&frame[8..8 + metadata_len]).map_err(|_| invalid())?;
     match &mut response {
-        Response::Data { data, .. } => *data = frame[8 + metadata_len..].to_vec(),
+        Response::Data { data, .. } | Response::EncodedData { data, .. } => {
+            *data = frame[8 + metadata_len..].to_vec()
+        }
         _ if data_len > 0 => return Err(invalid()),
         _ => {}
     }
@@ -262,7 +287,7 @@ pub async fn write_response(
         writer,
         serde_json::to_vec(response).map_err(|_| invalid())?,
         match response {
-            Response::Data { data, .. } => data.as_slice(),
+            Response::Data { data, .. } | Response::EncodedData { data, .. } => data.as_slice(),
             _ => &[],
         },
     )
@@ -293,6 +318,28 @@ mod tests {
         wrong.push(1);
         assert!(decode_response_frame(&wrong).is_err());
         assert!(decode_response_frame(&[0; 7]).is_err());
+    }
+    #[tokio::test]
+    async fn encoded_frames_keep_binary_payload_out_of_json() {
+        let response = Response::EncodedData {
+            offset: 99,
+            decoded_bytes: 100_000,
+            encoding: "zstd".into(),
+            data: zstd::bulk::compress(&vec![42; 100_000], 1).unwrap(),
+        };
+        assert!(
+            serde_json::to_value(&response)
+                .unwrap()
+                .get("data")
+                .is_none()
+        );
+        let mut frame = Vec::new();
+        write_response(&mut frame, &response).await.unwrap();
+        assert_eq!(
+            read_response(&mut frame.as_slice()).await.unwrap(),
+            Some(response.clone())
+        );
+        assert_eq!(decode_response_frame(&frame).unwrap(), response);
     }
     #[tokio::test]
     async fn binary_payload_is_bounded_and_never_json_encoded() {

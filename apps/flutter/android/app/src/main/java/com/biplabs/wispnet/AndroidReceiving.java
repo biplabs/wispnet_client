@@ -163,6 +163,87 @@ final class AndroidReceiving {
   return publish(args, descriptor, () -> Native.publicationCancelled(id));
  }
 
+ /** A folder download owns its top-level directory. Never merge a new job into
+  * an unrelated pre-existing provider directory. The receipt survives retries. */
+ void claimDownloadDirectory(String root, String name, String id,
+     java.util.function.BooleanSupplier cancelled) throws Exception {
+  synchronized (PUBLISH_LOCK) {
+   FileTransferRules.filename(name);
+   if (!id.matches("[0-9a-f]{64}") || !roots.contains(root)) throw new SecurityException("Unknown download folder");
+   check(id, cancelled);
+   Uri tree = Uri.parse(new JSONObject(roots.getString(root, "{}")).getString("uri"));
+   File directory = new File(context.getFilesDir(), "download-directories");
+   if (!directory.isDirectory() && !directory.mkdir()) throw new IOException("Cannot save download folder receipt");
+   AtomicFile journal = new AtomicFile(new File(directory, id + ".json"));
+   JSONObject record = null;
+   if (journal.getBaseFile().exists()) try (FileInputStream input = journal.openRead()) {
+    record = new JSONObject(new String(input.readAllBytes(), StandardCharsets.UTF_8));
+    if (!root.equals(record.getString("root")) || !name.equals(record.getString("name")))
+     throw new SecurityException("Download destination changed");
+   }
+   Uri parent = document(tree), existing = find(tree, parent, name);
+   if (existing != null && (record == null || !existing.toString().equals(record.getString("uri"))))
+    throw new Native.Failure("A folder with this name already exists in the download folder", "CONFLICT");
+   Uri output = childDirectory(tree, parent, name);
+   save(journal, new JSONObject().put("root", root).put("name", name).put("uri", output.toString()));
+   check(id, cancelled);
+  }
+ }
+
+ /** Preserve empty directories as well as the parents created by publish(). */
+ void downloadDirectory(String root, String path, java.util.function.BooleanSupplier cancelled) throws Exception {
+  synchronized (PUBLISH_LOCK) {
+   DownloadTree.path(path, false);
+   if (!roots.contains(root)) throw new SecurityException("Unknown download folder");
+   Uri tree = Uri.parse(new JSONObject(roots.getString(root, "{}")).getString("uri"));
+   Uri parent = document(tree);
+   for (String name : path.split("/")) { check("", cancelled); parent = childDirectory(tree, parent, name); }
+  }
+ }
+
+ /** Completed publication receipts let a resumed folder skip its files without
+  * trusting a name alone. Recheck actual provider bytes before reporting them. */
+ boolean downloadPublished(JSONObject args, java.util.function.BooleanSupplier cancelled) throws Exception {
+  synchronized (PUBLISH_LOCK) {
+   String id = args.getString("transfer");
+   if (!id.matches("[0-9a-f]{64}")) throw new SecurityException("Invalid download receipt");
+   AtomicFile journal = new AtomicFile(new File(context.getFilesDir(), "receiving-journal/" + id + ".json"));
+   if (!journal.getBaseFile().exists()) return false;
+   JSONObject record;
+   try (FileInputStream input = journal.openRead()) {
+    record = new JSONObject(new String(input.readAllBytes(), StandardCharsets.UTF_8));
+   }
+   if (!args.getString("root").equals(record.getString("root")) || !args.getString("path").equals(record.getString("path"))
+       || !args.getString("sha256").equals(record.getString("sha256")))
+    throw new SecurityException("Download publication changed");
+   if (!record.optBoolean("complete")) return false;
+   if (!roots.contains(args.getString("root"))) throw new SecurityException("Unknown download folder");
+   Uri tree = Uri.parse(new JSONObject(roots.getString(args.getString("root"), "{}")).getString("uri"));
+   Uri expected = document(tree);
+   DownloadTree.path(args.getString("path"), false);
+   for (String component : args.getString("path").split("/")) {
+    check(id, cancelled); expected = find(tree, expected, component);
+    if (expected == null) { journal.delete(); return false; }
+   }
+   if (!expected.toString().equals(record.getString("uri")))
+    throw new Native.Failure("The download destination now contains another file", "CONFLICT");
+   java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+   long size = 0;
+   try (java.io.InputStream input = context.getContentResolver().openInputStream(Uri.parse(record.getString("uri")))) {
+    if (input == null) throw new java.io.FileNotFoundException("Downloaded document unavailable");
+    byte[] buffer = new byte[256 * 1024]; int count;
+    while ((count = input.read(buffer)) != -1) {
+     check(id, cancelled); size += count;
+     if (size > args.getLong("size_bytes")) break;
+     digest.update(buffer, 0, count);
+    }
+   } catch (java.io.FileNotFoundException missing) { journal.delete(); return false; }
+   if (size != args.getLong("size_bytes") || !java.util.HexFormat.of().formatHex(digest.digest()).equals(args.getString("sha256")))
+    throw new Native.Failure("A completed download was modified in the destination folder", "CONFLICT");
+   return true;
+  }
+ }
+
  String publish(JSONObject args, int descriptor, java.util.function.BooleanSupplier cancelled) throws Exception {
   synchronized (PUBLISH_LOCK) {
    String id = args.getString("transfer"), root = args.getString("root"), path = args.getString("path");

@@ -11,7 +11,7 @@ use std::{
     time::Duration,
 };
 
-pub const HELP: &str = "Files: wispnet files put DEVICE INBOX LOCAL_PATH REMOTE_PATH [--config PATH] [--no-resume]\n       wispnet files ls DEVICE SHARE [REMOTE_PATH] [--config PATH]\n       wispnet files get DEVICE SHARE REMOTE_PATH LOCAL_PATH [--config PATH] [--no-resume]\n       wispnet files status TRANSFER [--config PATH]\n       wispnet files cancel TRANSFER [--config PATH]\nRead-only shares have separate permissions from the receiving inbox.\nTransfers resume by default. Ctrl+C pauses the transfer and retains resumable data.\nProgress is JSON on stderr; completion or a typed transfer error is JSON on stdout.";
+pub const HELP: &str = "Files: wispnet files put DEVICE INBOX LOCAL_PATH REMOTE_PATH [--config PATH] [--no-resume]\n       wispnet files ls DEVICE SHARE [REMOTE_PATH] [--config PATH]\n       wispnet files get DEVICE SHARE REMOTE_PATH LOCAL_PATH [--recursive] [--config PATH] [--no-resume]\n       wispnet files status TRANSFER [--config PATH]\n       wispnet files cancel TRANSFER [--config PATH]\nRead-only shares have separate permissions from the receiving inbox.\nTransfers resume by default. Ctrl+C pauses the transfer and retains resumable data.\nProgress is JSON on stderr; completion or a typed transfer error is JSON on stdout.";
 
 pub fn error_result(error: &str) -> Value {
     let (code, message) = error
@@ -28,11 +28,13 @@ struct Options {
     positional: Vec<String>,
     config: PathBuf,
     resume: bool,
+    recursive: bool,
 }
 fn options(args: &[OsString]) -> Result<Option<Options>, String> {
     let mut positional = Vec::new();
     let mut config = None;
     let mut resume = true;
+    let mut recursive = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         let arg = arg.to_str().ok_or("Files arguments must be valid UTF-8")?;
@@ -42,6 +44,7 @@ fn options(args: &[OsString]) -> Result<Option<Options>, String> {
                 config = Some(PathBuf::from(args.next().ok_or(HELP)?))
             }
             "--no-resume" => resume = false,
+            "--recursive" | "-r" => recursive = true,
             _ if !arg.starts_with('-') => positional.push(arg.to_owned()),
             _ => return Err(HELP.into()),
         }
@@ -56,12 +59,16 @@ fn options(args: &[OsString]) -> Result<Option<Options>, String> {
     } {
         return Err(HELP.into());
     }
+    if recursive && action != "get" {
+        return Err(HELP.into());
+    }
     let config = config.unwrap_or(crate::tui::api::home()?.join(".config/wispnet-node/host.toml"));
     Ok(Some(Options {
         action,
         positional,
         config,
         resume,
+        recursive,
     }))
 }
 
@@ -113,7 +120,7 @@ pub fn run_args(args: &[OsString]) -> Result<u32, String> {
     }
     let request = if downloading {
         let path = absolute_path(Path::new(&options.positional[3]))?;
-        json!({"op":"file_get","host":host,"service":service_id,"incarnation":service["incarnation"],"path":options.positional[2],"local_path":path,"resume":options.resume})
+        json!({"op":"file_get","host":host,"service":service_id,"incarnation":service["incarnation"],"path":if options.recursive && options.positional[2] == "." { "" } else { &options.positional[2] },"local_path":path,"resume":options.resume,"recursive":options.recursive})
     } else {
         let path = absolute_path(Path::new(&options.positional[2]))?;
         let workspace = if service["kind"] == "files" && selector != "files" {
@@ -355,6 +362,28 @@ mod tests {
             "/tmp/config",
         ]));
         assert_eq!(download.unwrap().unwrap().action, "get");
+        let recursive = options(&args(&[
+            "get",
+            "device",
+            "training",
+            "run-1",
+            "output",
+            "--recursive",
+        ]))
+        .unwrap()
+        .unwrap();
+        assert!(recursive.recursive);
+        assert!(
+            options(&args(&[
+                "put",
+                "device",
+                "training",
+                "input",
+                "output",
+                "--recursive"
+            ]))
+            .is_err()
+        );
         let list = options(&args(&["ls", "device", "checkpoints"]))
             .unwrap()
             .unwrap();

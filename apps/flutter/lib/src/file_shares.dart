@@ -261,7 +261,7 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
           name.contains('/') ||
           name.contains('\\') ||
           name.contains('\u0000')) {
-        throw const FormatException('The shared file has an invalid name.');
+        throw const FormatException('The shared item has an invalid name.');
       }
       final destination = await widget.backend.invoke(
         widget.desktop ? 'pickFolder' : 'pickDownloadFolder',
@@ -278,6 +278,7 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
               ? '$folder${Platform.pathSeparator}$name'
               : folder,
           'name': name,
+          if (entry['is_dir'] == true) 'recursive': true,
           'resume': true,
         },
       );
@@ -300,7 +301,7 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          'Read-only share. Choose files to download to this device. Inbox access is separate.',
+          'Read-only share. Choose files or folders to download to this device. Inbox access is separate.',
         ),
         const SizedBox(height: 12),
         Row(
@@ -324,6 +325,19 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
                     ? '${widget.service['id']} /'
                     : '${widget.service['id']} / $path',
               ),
+            ),
+            IconButton(
+              tooltip: 'Download this folder',
+              onPressed: loading || choosing || failure != null
+                  ? null
+                  : () => download({
+                      'name': path.isEmpty
+                          ? widget.service['id']
+                          : path.split('/').last,
+                      'path': path,
+                      'is_dir': true,
+                    }),
+              icon: const Icon(Icons.download),
             ),
             IconButton(
               tooltip: 'Refresh shared files',
@@ -357,12 +371,13 @@ class _SharedFilesBrowserState extends State<SharedFilesBrowser> {
                 ? () => load(entry['path'] as String)
                 : null,
             actions: [
-              if (entry['is_dir'] != true)
-                IconButton(
-                  tooltip: 'Download ${entry['name']}',
-                  onPressed: choosing ? null : () => download(entry),
-                  icon: const Icon(Icons.download),
-                ),
+              IconButton(
+                tooltip: entry['is_dir'] == true
+                    ? 'Download folder ${entry['name']}'
+                    : 'Download ${entry['name']}',
+                onPressed: choosing ? null : () => download(entry),
+                icon: const Icon(Icons.download),
+              ),
             ],
           ),
         if (cursor != null)
@@ -424,6 +439,9 @@ class SharedDownloadTile extends StatelessWidget {
     final state = job.status['state'] as String? ?? 'starting';
     final size = (job.status['size_bytes'] as num?)?.toInt() ?? 0;
     final verified = (job.status['verified_bytes'] as num?)?.toInt() ?? 0;
+    final filesTotal = (job.status['files_total'] as num?)?.toInt();
+    final filesComplete = (job.status['files_complete'] as num?)?.toInt() ?? 0;
+    final folder = job.request['recursive'] == true;
     final error = job.status['error'];
     final changed = error is Map && error['code'] == 'STALE_VERSION';
     final problem =
@@ -440,6 +458,8 @@ class SharedDownloadTile extends StatelessWidget {
                   ? 'Downloaded · ${fileSize(size)}'
                   : '${job.status['phase'] ?? state} · ${fileSize(verified)} / ${fileSize(size)}',
             ),
+            if (folder && filesTotal != null)
+              Text('$filesComplete / $filesTotal files'),
             if (!job.finished)
               LinearProgressIndicator(
                 value: size > 0 ? (verified / size).clamp(0, 1) : null,

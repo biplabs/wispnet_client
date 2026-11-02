@@ -199,6 +199,7 @@ impl State {
             | "file_put"
             | "file_list"
             | "file_get"
+            | "file_stat"
             | "file_workspaces"
             | "file_status"
             | "file_cancel"

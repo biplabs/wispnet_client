@@ -137,7 +137,10 @@ On desktop or Android, use **Local services → Share a service** and choose **R
 files** (Inbox) or **Share files** (Shared folder). Create multiple folders and
 grant each one to selected devices. The CLI provides `wispnet inbox` and
 `wispnet share` for setup, `files put` for inbox uploads, and `files ls|get` for
-browsing and downloading shares. See [file transfers](docs/files.md) for
+browsing and downloading shares. Folder downloads use `files get --recursive`
+or the app's folder download button. New peers automatically use fast streaming
+compression when useful, without creating archives. See
+[file transfers](docs/files.md) for
 migration details, resumable CLI/SDK use, and throughput targets.
 
 Run `wispnet` for interactive QR pairing, pending approvals, machine removal,

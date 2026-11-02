@@ -7,7 +7,7 @@ use iroh::endpoint::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-pub use shares::SharePage;
+pub use shares::{FolderInfo, SharePage};
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::{File, OpenOptions},
@@ -42,6 +42,10 @@ pub struct TransferProgress {
     pub phase: String,
     pub verified_bytes: u64,
     pub size_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_complete: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub files_total: Option<u64>,
 }
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct TransferError {
@@ -160,6 +164,8 @@ impl TransferOptions {
                 phase: phase.into(),
                 verified_bytes,
                 size_bytes,
+                files_complete: None,
+                files_total: None,
             });
         }
     }
@@ -442,7 +448,7 @@ impl Client {
         value: &Value,
     ) -> std::result::Result<Value, String> {
         match value["op"].as_str().unwrap_or("") {
-            "file_list" | "file_get" => self.shares_command(value).await,
+            "file_list" | "file_stat" | "file_get" => self.shares_command(value).await,
             "file_workspaces" => {
                 let target = FileTarget {
                     host: crate::peer(value)?,

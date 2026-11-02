@@ -181,6 +181,24 @@ class BridgeTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'access unavailable'):
                 self.bridge.dispatch('shareList', target)
 
+    def test_folder_download_forwards_one_native_recursive_job_including_share_root(self):
+        target = dict(host=OWN, service='checkpoints', incarnation=INCARNATION)
+        self.status['host']['services'] = [dict(id='checkpoints', kind='file_share', incarnation=INCARNATION)]
+        destination = str(self.root / 'checkpoint-folder')
+        with patch.object(Path, 'read_bytes', side_effect=AssertionError('File content crossed Python')):
+            for path in ('run-1', ''):
+                self.bridge.dispatch('shareGet', dict(target, path=path,
+                                     local_path=destination, recursive=True))
+                self.assertEqual(self.calls[-1], dict(op='file_get', **target, path=path,
+                                     local_path=destination, resume=True, recursive=True))
+        self.assertNotIn('file_put', [call['op'] for call in self.calls])
+        for recursive in ('yes', 1, None):
+            with self.assertRaisesRegex(ValueError, 'Recursive'):
+                self.bridge.dispatch('shareGet', dict(target, path='run-1',
+                                     local_path=destination, recursive=recursive))
+        with self.assertRaisesRegex(ValueError, 'Choose a file'):
+            self.bridge.dispatch('shareGet', dict(target, path='', local_path=destination))
+
     def test_named_inbox_upload_uses_only_the_selected_service(self):
         source = self.root / 'dataset.bin'
         source.write_bytes(b'upload contents')

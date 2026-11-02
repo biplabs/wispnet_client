@@ -7,7 +7,7 @@ and access to another folder never grant access to this folder.
 | Mode | Local badge | What permitted devices can do |
 | --- | --- | --- |
 | Receive files | Inbox | Upload files into this folder |
-| Share files | Shared folder | Browse and download files from this folder |
+| Share files | Shared folder | Browse and download files or subfolders |
 
 On desktop or Android, open **Local services → Add folder**, choose **Receive
 files** or **Share files**, name the service, select a folder, and choose its
@@ -169,6 +169,7 @@ wispnet share checkpoints --path /workspace/checkpoints --allow FULL_LAPTOP_PUBL
 wispnet files ls GPU_HOST checkpoints
 wispnet files ls GPU_HOST checkpoints run-1
 wispnet files get GPU_HOST checkpoints run-1/model.safetensors ./model.safetensors
+wispnet files get GPU_HOST checkpoints run-1 ./run-1 --recursive
 ```
 
 Use `wispnet share` to list local shares and `wispnet share checkpoints` to
@@ -191,8 +192,13 @@ The resulting **Shared folder** card has its own folder and reader permissions.
 Inbox services continue to authorize uploads independently.
 
 Open a remote shared-files service in the desktop or Android app to browse its
-folders and choose a file to download. The receiving device selects its local
-destination. Downloads show progress, cancellation, and resume controls and
+folders and choose a file or folder to download. Tapping a folder's name opens
+it; its download button downloads the whole subtree. **Download this folder**
+in the browser header downloads the current folder, including the whole share
+at its root. Choose one local destination; the selected folder's name and its
+nested and empty folders are preserved. Folder downloads appear as one task
+with total bytes and completed-file counts.
+Downloads show progress, cancellation, and resume controls and
 continue when the browser closes. On Android, choose a writable destination
 with the system folder picker; no inbox configuration or grant is needed.
 Android downloads are verified in private storage before copying into the
@@ -211,7 +217,9 @@ Removing a share does not delete its files. If Android or the document provider
 withdraws access, select the folder again. Shares are served by the foreground
 network process while Wispnet is online, including when the UI is closed.
 
-The CLI downloads one regular file per `files get`. It resumes by default;
+The CLI downloads one regular file per `files get`, or an entire folder with
+`--recursive`. For a whole share, pass `""` as the remote path and choose a new
+local folder name. The destination's parent must exist. It resumes by default;
 repeat the command after interruption or use the app's **Resume download**.
 `files ls` emits one JSON object per page, with up to 32 entries per page.
 Resume binds the source host, share incarnation, relative path, file version,
@@ -224,11 +232,44 @@ versions. Publish training checkpoints only after they are complete, and keep
 all shards of a checkpoint together; downloads do not create a transactional
 snapshot across multiple files.
 
+Folder jobs retain a manifest of the selected relative paths and file versions.
+Resume keeps verified progress and rejects detected source changes instead of
+silently combining checkpoint versions. Existing unrelated destination folders
+are never merged or overwritten. Desktop builds the folder in a private staging
+directory beside the destination and publishes it after verification. Android
+copies one verified file at a time into its selected document provider, so its
+owned destination folder and completed children can be visible before the task
+finishes. No archive is created on the source device.
+
+### Automatic download compression
+
+New peers negotiate streaming Zstandard compression for file payloads, with
+uncompressed transfer as the fallback. Compression uses a fast level, samples
+data from different parts of a chunk, and avoids compression when its measured
+cost or small size reduction makes it unsuitable. Poorly compressible data is
+periodically sampled again, so one header does not decide an entire large file.
+Desktop folder jobs reuse the authenticated session across listings and files.
+Android publishes one verified child at a time through its document provider and
+currently starts a native file job for each child.
+Older source devices continue to serve ordinary uncompressed downloads.
+
+Compression changes only bytes on the wire: original file offsets, source
+versions, checksums and resume data remain authoritative. The receiving device
+decodes bounded chunks and writes the original files. Files remain byte-for-byte
+identical, and neither device needs a ZIP file or an extraction step. Actual
+speed depends on the source data, connection, CPU and storage; compression is
+not a promise of faster transfers on every link.
+
 Owner-local `file_list` returns one bounded page of entries with an optional
-`next_cursor`. `file_get` starts a download job; `file_status` and `file_cancel`
+`next_cursor`. `file_stat` starts a cancellable metadata job whose completed
+status includes the shared file's version metadata. `file_get`
+starts a download job; `recursive: true` selects a folder job, and
+`expected_version` can pin an individual file to previously inspected metadata.
+`file_status` and `file_cancel`
 use the same bounded job lifecycle as uploads. Only paths, metadata, and job
 handles cross the owner API; file bytes use the native binary tunnel. The Rust
-SDK exposes `Client::list_shared_files` and `Client::get_file` with the existing
+SDK exposes `Client::list_shared_files`, `Client::get_file` and
+`Client::get_folder` with the existing
 `FileTarget`, `TransferOptions`, and cancellation/progress callbacks.
 
 ## Reliability and limits

@@ -1,6 +1,22 @@
 //! Read-only shares use independent service grants; inbox access is never read access.
 use super::*;
 use wispnet_files::ShareEntry;
+#[path = "folders.rs"]
+mod folders;
+pub use folders::FolderInfo;
+
+#[derive(Clone, Copy)]
+enum DownloadExpectation<'a> {
+    Any,
+    Version(&'a str),
+    Pinned(&'a FileInfo),
+}
+
+struct ShareSession {
+    stream: BoxStream,
+    _resources: Resources,
+    encoded: bool,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SharePage {
@@ -27,9 +43,17 @@ impl Client {
             return Err(protocol_error());
         }
         let (mut stream, _resources) = self.share_stream(&target).await?;
+        Self::list_shared_files_on(&mut stream, path, cursor).await
+    }
+
+    async fn list_shared_files_on(
+        stream: &mut BoxStream,
+        path: &str,
+        cursor: Option<String>,
+    ) -> Result<SharePage> {
         tokio::time::timeout(Duration::from_secs(30), async {
             write_request(
-                &mut stream,
+                &mut *stream,
                 &Request::ShareList {
                     path: path.into(),
                     cursor: cursor.clone(),
@@ -37,7 +61,7 @@ impl Client {
             )
             .await
             .map_err(TransferError::io)?;
-            match response(&mut stream).await? {
+            match response(&mut *stream).await? {
                 Response::Entries {
                     entries,
                     next_cursor,
@@ -105,7 +129,7 @@ impl Client {
         let result = tokio::select! {
             biased;
             _ = options.cancellation.cancelled() => Err(TransferError::new("CANCELLED", "Download paused; resumable data retained")),
-            result = self.get_file_inner(target, remote_path, local_path, &options) => result,
+            result = self.get_file_inner(target, remote_path, local_path, &options, None) => result,
         };
         guard.armed = false;
         result
@@ -122,7 +146,23 @@ impl Client {
         };
         valid_share_target(&target).map_err(|e| e.to_string())?;
         let path = crate::argument(value, "path")?.to_owned();
-        valid_share_path(&path, value["op"] == "file_list").map_err(|e| e.to_string())?;
+        let recursive = value
+            .get("recursive")
+            .map(|v| v.as_bool().ok_or("recursive must be a boolean"))
+            .transpose()?
+            .unwrap_or(false);
+        valid_share_path(&path, value["op"] == "file_list" || recursive)
+            .map_err(|e| e.to_string())?;
+        let inspecting = value["op"] == "file_stat";
+        let expected_version = value
+            .get("expected_version")
+            .map(|v| {
+                v.as_str()
+                    .filter(|v| !v.is_empty() && v.len() <= 4096)
+                    .map(str::to_owned)
+                    .ok_or("expected_version must be a nonempty version string")
+            })
+            .transpose()?;
         if value["op"] == "file_list" {
             let cursor = value
                 .get("cursor")
@@ -139,7 +179,11 @@ impl Client {
                 .and_then(|p| serde_json::to_value(p).map_err(|_| protocol_error()))
                 .map_err(|e| e.to_string());
         }
-        let local_path = PathBuf::from(crate::argument(value, "local_path")?);
+        let local_path = if inspecting {
+            PathBuf::new()
+        } else {
+            PathBuf::from(crate::argument(value, "local_path")?)
+        };
         let resume = value
             .get("resume")
             .map(|v| v.as_bool().ok_or("resume must be a boolean"))
@@ -157,7 +201,7 @@ impl Client {
             host: target.host,
             cancellation: cancellation.clone(),
             status: Mutex::new(
-                json!({"transfer":id,"direction":"download","state":"running","phase":"preparing","verified_bytes":0,"size_bytes":0}),
+                json!({"transfer":id,"direction":if inspecting { "inspection" } else { "download" },"recursive":recursive,"state":"running","phase":"preparing","verified_bytes":0,"size_bytes":0}),
             ),
             finished: Mutex::new(None),
         });
@@ -200,6 +244,12 @@ impl Client {
                 s["phase"] = json!(p.phase);
                 s["verified_bytes"] = json!(p.verified_bytes);
                 s["size_bytes"] = json!(p.size_bytes);
+                if let Some(n) = p.files_complete {
+                    s["files_complete"] = json!(n);
+                }
+                if let Some(n) = p.files_total {
+                    s["files_total"] = json!(n);
+                }
             })),
         };
         let client = self.clone();
@@ -207,7 +257,39 @@ impl Client {
         let started = Instant::now();
         tokio::spawn(async move {
             let _permit = permit;
-            let result = client.get_file(target, &path, &local_path, options).await;
+            let result = if inspecting {
+                let mut guard = CancelOnDrop {
+                    cancellation: options.cancellation.clone(),
+                    armed: true,
+                };
+                let result = tokio::select! {
+                    biased;
+                    _ = options.cancellation.cancelled() => Err(TransferError::new("CANCELLED", "File inspection cancelled")),
+                    result = async {
+                        let (mut stream, _resources) = client.share_stream(&target).await?;
+                        Self::shared_file_info(&mut stream, &path).await
+                    } => result,
+                };
+                guard.armed = false;
+                result.and_then(|file| serde_json::to_value(file).map_err(|_| protocol_error()))
+            } else if recursive {
+                client
+                    .get_folder(target, &path, &local_path, options)
+                    .await
+                    .and_then(|folder| serde_json::to_value(folder).map_err(|_| protocol_error()))
+            } else {
+                let mut guard = CancelOnDrop {
+                    cancellation: options.cancellation.clone(),
+                    armed: true,
+                };
+                let result = tokio::select! {
+                    biased;
+                    _ = options.cancellation.cancelled() => Err(TransferError::new("CANCELLED", "Download paused; resumable data retained")),
+                    result = client.get_file_inner(target, &path, &local_path, &options, expected_version.as_deref()) => result,
+                };
+                guard.armed = false;
+                result.and_then(|file| serde_json::to_value(file).map_err(|_| protocol_error()))
+            };
             let mut status = operation_job
                 .status
                 .lock()
@@ -217,10 +299,18 @@ impl Client {
                 Ok(file) => {
                     status["state"] = json!("complete");
                     status["phase"] = json!("complete");
-                    status["verified_bytes"] = json!(file.size_bytes);
-                    status["size_bytes"] = json!(file.size_bytes);
-                    status["file"] = json!(file);
-                    status["local_path"] = json!(local_path);
+                    status["verified_bytes"] = file["size_bytes"].clone();
+                    status["size_bytes"] = file["size_bytes"].clone();
+                    if recursive {
+                        status["files_complete"] = file["files_total"].clone();
+                        status["files_total"] = file["files_total"].clone();
+                        status["folder"] = file;
+                    } else {
+                        status["file"] = file;
+                    }
+                    if !inspecting {
+                        status["local_path"] = json!(local_path);
+                    }
                 }
                 Err(e) => {
                     status["state"] = json!(if e.code == "CANCELLED" {
@@ -238,6 +328,63 @@ impl Client {
         });
         let status = job.status.lock().unwrap_or_else(|e| e.into_inner()).clone();
         Ok(status)
+    }
+
+    async fn share_session(self: &Arc<Self>, target: &FileTarget) -> Result<ShareSession> {
+        let (mut stream, resources) = self.share_stream(target).await?;
+        let negotiated = tokio::time::timeout(Duration::from_secs(3), async {
+            write_request(&mut stream, &Request::ShareCapabilities)
+                .await
+                .map_err(TransferError::io)?;
+            match response(&mut stream).await? {
+                Response::ShareCapabilities { encodings } if encodings.len() <= 16 => {
+                    Ok(encodings.iter().any(|e| e == "zstd"))
+                }
+                _ => Err(protocol_error()),
+            }
+        })
+        .await;
+        if let Ok(Ok(encoded)) = negotiated {
+            return Ok(ShareSession {
+                stream,
+                _resources: resources,
+                encoded,
+            });
+        }
+        // Legacy peers may close the stream on the unknown capability request.
+        // Reopen with the original range operation, preserving interoperability.
+        drop(stream);
+        drop(resources);
+        let (stream, resources) = self.share_stream(target).await?;
+        Ok(ShareSession {
+            stream,
+            _resources: resources,
+            encoded: false,
+        })
+    }
+
+    async fn shared_file_info(stream: &mut BoxStream, remote: &str) -> Result<FileInfo> {
+        write_request(
+            stream,
+            &Request::ShareStat {
+                path: remote.into(),
+            },
+        )
+        .await
+        .map_err(TransferError::io)?;
+        let info = match timed_response(stream).await? {
+            Response::File { file } => file,
+            _ => return Err(protocol_error()),
+        };
+        if info.path != remote
+            || info.size_bytes > 1u64 << 40
+            || !wispnet_core::enrollment::valid_code(&info.sha256)
+            || info.file_version.is_empty()
+            || info.file_version.len() > 4096
+        {
+            return Err(protocol_error());
+        }
+        Ok(info)
     }
 
     async fn share_stream(self: &Arc<Self>, target: &FileTarget) -> Result<(BoxStream, Resources)> {
@@ -398,6 +545,30 @@ impl Client {
         remote: &str,
         local: &Path,
         options: &TransferOptions,
+        expected_version: Option<&str>,
+    ) -> Result<FileInfo> {
+        let mut session = self.share_session(&target).await?;
+        self.get_file_on_session(
+            target,
+            remote,
+            local,
+            options,
+            &mut session,
+            expected_version
+                .map(DownloadExpectation::Version)
+                .unwrap_or(DownloadExpectation::Any),
+        )
+        .await
+    }
+
+    async fn get_file_on_session(
+        self: &Arc<Self>,
+        target: FileTarget,
+        remote: &str,
+        local: &Path,
+        options: &TransferOptions,
+        session: &mut ShareSession,
+        expected: DownloadExpectation<'_>,
     ) -> Result<FileInfo> {
         let local = absolute_file_path(local)?;
         let binding = Binding {
@@ -421,26 +592,17 @@ impl Client {
             .parent()
             .ok_or_else(protocol_error)?
             .join(format!(".wispnet-download-{key}.part"));
-        let (mut stream, mut resources) = self.share_stream(&target).await?;
-        write_request(
-            &mut stream,
-            &Request::ShareStat {
-                path: remote.into(),
-            },
-        )
-        .await
-        .map_err(TransferError::io)?;
-        let info = match timed_response(&mut stream).await? {
-            Response::File { file } => file,
-            _ => return Err(protocol_error()),
+        let info = if let DownloadExpectation::Pinned(file) = expected {
+            file.clone()
+        } else {
+            Self::shared_file_info(&mut session.stream, remote).await?
         };
-        if info.path != remote
-            || info.size_bytes > 1u64 << 40
-            || !wispnet_core::enrollment::valid_code(&info.sha256)
-            || info.file_version.is_empty()
-            || info.file_version.len() > 4096
+        if matches!(expected, DownloadExpectation::Version(version) if version != info.file_version)
         {
-            return Err(protocol_error());
+            return Err(TransferError::new(
+                "STALE_VERSION",
+                "Shared file changed; restart the download",
+            ));
         }
         let existing = blocking({
             let local = local.clone();
@@ -553,19 +715,26 @@ impl Client {
                     break;
                 }
                 let count = (info.size_bytes - requested).min(MAX_CHUNK as u64);
-                let request = Request::ShareReadRange {
-                    path: remote.into(),
-                    expected_version: info.file_version.clone(),
-                    offset: requested,
-                    max_bytes: count,
+                let request = if session.encoded {
+                    Request::ShareReadRangeEncoded {
+                        path: remote.into(),
+                        expected_version: info.file_version.clone(),
+                        offset: requested,
+                        max_bytes: count,
+                    }
+                } else {
+                    Request::ShareReadRange {
+                        path: remote.into(),
+                        expected_version: info.file_version.clone(),
+                        offset: requested,
+                        max_bytes: count,
+                    }
                 };
-                if let Err(error) = write_request(&mut stream, &request).await {
+                if let Err(error) = write_request(&mut session.stream, &request).await {
                     let error = TransferError::io(error);
                     if retryable(&error) && retries < MAX_RETRIES {
                         retries += 1;
-                        let reopened = self.share_stream(&target).await?;
-                        stream = reopened.0;
-                        resources = reopened.1;
+                        *session = self.share_session(&target).await?;
                         continue 'transfer;
                     }
                     return Err(error);
@@ -575,7 +744,18 @@ impl Client {
             }
             for _ in 0..pending {
                 let expected = (info.size_bytes - journal.offset).min(MAX_CHUNK as u64);
-                let (offset, data) = match timed_response(&mut stream).await {
+                let response = match timed_response(&mut session.stream).await {
+                    Ok(response @ Response::EncodedData { .. }) => {
+                        blocking(move || {
+                            wispnet_files::decode_data_response(response)
+                                .map_err(|_| protocol_error())
+                        })
+                        .await
+                    }
+                    Ok(response) => Ok(response),
+                    Err(error) => Err(error),
+                };
+                let (offset, data) = match response {
                     Ok(Response::Data { offset, data })
                         if offset == journal.offset && data.len() as u64 == expected =>
                     {
@@ -584,9 +764,7 @@ impl Client {
                     Ok(_) => return Err(protocol_error()),
                     Err(error) if retryable(&error) && retries < MAX_RETRIES => {
                         retries += 1;
-                        let reopened = self.share_stream(&target).await?;
-                        stream = reopened.0;
-                        resources = reopened.1;
+                        *session = self.share_session(&target).await?;
                         continue 'transfer;
                     }
                     Err(error) => return Err(error),
@@ -642,24 +820,28 @@ impl Client {
             }
         })
         .await?;
-        // Check the pinned version again before making the completed artifact visible.
-        write_request(
-            &mut stream,
-            &Request::ShareStat {
-                path: remote.into(),
-            },
-        )
-        .await
-        .map_err(TransferError::io)?;
-        match timed_response(&mut stream).await? {
-            Response::File { file } if file == info => {}
-            Response::File { .. } => {
-                return Err(TransferError::new(
-                    "STALE_VERSION",
-                    "Shared file changed during download",
-                ));
+        // Folder files remain in a private staging tree; the enclosing batch
+        // rechecks every pinned version immediately before directory publication.
+        // Standalone downloads must verify again before publishing this file.
+        if !matches!(expected, DownloadExpectation::Pinned(_)) {
+            write_request(
+                &mut session.stream,
+                &Request::ShareStat {
+                    path: remote.into(),
+                },
+            )
+            .await
+            .map_err(TransferError::io)?;
+            match timed_response(&mut session.stream).await? {
+                Response::File { file } if file == info => {}
+                Response::File { .. } => {
+                    return Err(TransferError::new(
+                        "STALE_VERSION",
+                        "Shared file changed during download",
+                    ));
+                }
+                _ => return Err(protocol_error()),
             }
-            _ => return Err(protocol_error()),
         }
         blocking({
             let local = local.clone();
@@ -682,7 +864,6 @@ impl Client {
             }
         })
         .await?;
-        drop(resources);
         options.report("complete", info.size_bytes, info.size_bytes);
         Ok(info)
     }
