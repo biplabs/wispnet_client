@@ -335,6 +335,7 @@ class _WispHomeState extends State<WispHome>
       title: hostName,
       showHeader: false,
       scrollable: false,
+      fillHeight: true,
       maxWidth: 1120,
       child: DesktopTerminalSheet(
         manager: desktopShells,
@@ -1286,6 +1287,7 @@ class _WispHomeState extends State<WispHome>
       ),
       expandLabel: 'Expand shell $title',
       closeLabel: 'Close shell',
+      showClose: snapshot['desktop'] == true,
       onExpand: busy ? null : () => expandShell(shell),
       onClose: busy ? null : () => confirmCloseShell(shell),
     );

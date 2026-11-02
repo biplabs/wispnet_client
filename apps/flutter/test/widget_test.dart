@@ -2525,7 +2525,7 @@ void main() {
     },
   );
   testWidgets(
-    'minimized shell docks at the bottom and can be expanded or closed',
+    'Android shell dock expands and minimizes without a close button',
     (tester) async {
       final backend = FakeBackend(
         shellService: true,
@@ -2561,16 +2561,12 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('desktop-shell-close')));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const ValueKey('shell-dock-close')));
-      await tester.pumpAndSettle();
-      expect(find.text('Close terminal?'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('confirm-close-shell')));
-      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('shell-dock-close')), findsNothing);
       expect(
         backend.calls.where((c) => c.$1 == 'nativeTerminalClose'),
-        hasLength(1),
+        isEmpty,
       );
-      expect(find.byKey(const ValueKey('shell-dock')), findsNothing);
+      expect(find.byKey(const ValueKey('shell-dock')), findsOneWidget);
       await close(tester);
     },
   );
@@ -2702,23 +2698,22 @@ void main() {
       expect(find.text('j-strix · main'), findsOneWidget);
       expect(find.text('j-desktop · tab-2'), findsOneWidget);
 
-      await tester.tap(find.byKey(ValueKey('shell-dock-close-$secondHost')));
+      expect(find.byKey(const ValueKey('shell-dock-close')), findsNothing);
+      expect(
+        find.byKey(ValueKey('shell-dock-close-$secondHost')),
+        findsNothing,
+      );
+      await tester.tap(find.byKey(ValueKey('shell-dock-expand-$secondHost')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('confirm-close-shell')));
+      expect(find.byType(DesktopTerminalSheet), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('desktop-shell-close')));
       await tester.pumpAndSettle();
       expect(
-        backend.calls.where((c) => c.$1 == 'nativeTerminalClose').single.$2,
-        {
-          'host': secondHost,
-          'host_name': 'j-desktop',
-          'service': 'shell',
-          'incarnation': incarnation,
-          'session': 'tab-2',
-          'terminate': true,
-        },
+        backend.calls.where((c) => c.$1 == 'nativeTerminalClose'),
+        isEmpty,
       );
       expect(find.text('j-strix · main'), findsOneWidget);
-      expect(find.text('j-desktop · tab-2'), findsNothing);
+      expect(find.text('j-desktop · tab-2'), findsOneWidget);
       await close(tester);
     },
   );

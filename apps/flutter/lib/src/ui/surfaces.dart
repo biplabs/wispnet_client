@@ -68,11 +68,13 @@ class WispDockBar extends StatelessWidget {
     required this.closeLabel,
     this.expandKey,
     this.closeKey,
+    this.showClose = true,
   });
   final String title, expandLabel, closeLabel;
   final Color statusColor;
   final VoidCallback? onExpand, onClose;
   final Key? expandKey, closeKey;
+  final bool showClose;
 
   @override
   Widget build(BuildContext context) => WispPanel(
@@ -89,7 +91,8 @@ class WispDockBar extends StatelessWidget {
               key: expandKey,
               onTap: onExpand,
               borderRadius: BorderRadius.circular(12),
-              child: Padding(
+              child: Container(
+                constraints: const BoxConstraints(minHeight: 48),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 child: Row(
                   children: [
@@ -118,13 +121,15 @@ class WispDockBar extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 4),
-        IconButton(
-          key: closeKey,
-          tooltip: closeLabel,
-          onPressed: onClose,
-          icon: const Icon(Icons.close, size: 18, color: WispColors.muted),
-        ),
+        if (showClose) ...[
+          const SizedBox(width: 4),
+          IconButton(
+            key: closeKey,
+            tooltip: closeLabel,
+            onPressed: onClose,
+            icon: const Icon(Icons.close, size: 18, color: WispColors.muted),
+          ),
+        ],
       ],
     ),
   );
@@ -176,6 +181,7 @@ Future<T?> showWispSheet<T>(
   required Widget child,
   bool showHeader = true,
   bool scrollable = true,
+  bool fillHeight = false,
   double maxWidth = 640,
 }) {
   final navigator = Navigator.of(context);
@@ -198,7 +204,7 @@ Future<T?> showWispSheet<T>(
       ),
       builder: (context) {
         final content = Column(
-          mainAxisSize: MainAxisSize.min,
+          mainAxisSize: fillHeight ? MainAxisSize.max : MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Center(
@@ -244,6 +250,7 @@ Future<T?> showWispSheet<T>(
               const SizedBox(height: 12),
             ],
             Flexible(
+              fit: fillHeight ? FlexFit.tight : FlexFit.loose,
               child: scrollable ? SingleChildScrollView(child: child) : child,
             ),
           ],
@@ -251,13 +258,15 @@ Future<T?> showWispSheet<T>(
         return Padding(
           padding: EdgeInsets.fromLTRB(
             12,
-            20,
+            fillHeight ? 0 : 20,
             12,
             12 + MediaQuery.viewInsetsOf(context).bottom,
           ),
           child: ConstrainedBox(
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.sizeOf(context).height * .86,
+              maxHeight: fillHeight
+                  ? double.infinity
+                  : MediaQuery.sizeOf(context).height * .86,
             ),
             child: WispPanel(
               color: WispColors.sheet,

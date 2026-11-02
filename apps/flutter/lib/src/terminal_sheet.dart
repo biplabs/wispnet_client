@@ -1020,6 +1020,7 @@ class HostShellWorkspace extends ChangeNotifier {
   }
 
   void splitActivePane(Axis axis) {
+    if (android) return;
     final tab = selectedTab;
     if (tab.panes.length >= 4) return;
     tab.splitAxis = axis;
@@ -1134,12 +1135,15 @@ class HostShellWorkspace extends ChangeNotifier {
 
   void restoreTabs(List<dynamic> saved, String? selected) {
     final used = <String>{};
-    for (final entry in saved.whereType<Map>().take(16)) {
+    String? selectedSession;
+    // Legacy phone layouts may contain up to 16 tabs with four panes each.
+    for (final entry in saved.whereType<Map>().take(android ? 64 : 16)) {
+      if (android && tabs.length >= 64) break;
       final sessions = (entry['panes'] as List? ?? [])
           .whereType<String>()
           .where((name) => RegExp(r'^[a-z0-9._-]{1,64}$').hasMatch(name))
           .where(used.add)
-          .take(4)
+          .take(android ? math.min(4, 64 - tabs.length) : 4)
           .toList();
       if (sessions.isEmpty) continue;
       final panes = [
@@ -1154,19 +1158,32 @@ class HostShellWorkspace extends ChangeNotifier {
             android: android,
           )..addListener(_forwardChange),
       ];
-      final tab = DesktopShellTab(
-        id: entry['id'] as String? ?? sessions.first,
-        initialPane: panes.first,
-      );
-      tab.panes.addAll(panes.skip(1));
-      tab.splitAxis = entry['axis'] == 'vertical'
-          ? Axis.vertical
-          : Axis.horizontal;
-      tab.activePane = panes.firstWhere(
-        (pane) => pane.session == entry['active'],
-        orElse: () => panes.first,
-      );
-      tabs.add(tab);
+      if (android) {
+        // Preserve sessions from older split layouts as separate phone tabs.
+        for (final pane in panes) {
+          tabs.add(DesktopShellTab(id: pane.session, initialPane: pane));
+        }
+        if (selected != null &&
+            (entry['id'] as String? ?? sessions.first) == selected) {
+          selectedSession = sessions.contains(entry['active'])
+              ? entry['active'] as String
+              : sessions.first;
+        }
+      } else {
+        final tab = DesktopShellTab(
+          id: entry['id'] as String? ?? sessions.first,
+          initialPane: panes.first,
+        );
+        tab.panes.addAll(panes.skip(1));
+        tab.splitAxis = entry['axis'] == 'vertical'
+            ? Axis.vertical
+            : Axis.horizontal;
+        tab.activePane = panes.firstWhere(
+          (pane) => pane.session == entry['active'],
+          orElse: () => panes.first,
+        );
+        tabs.add(tab);
+      }
       for (final session in sessions) {
         final suffix = int.tryParse(session.split('-').last) ?? 1;
         _counter = math.max(_counter, suffix);
@@ -1174,7 +1191,7 @@ class HostShellWorkspace extends ChangeNotifier {
     }
     if (tabs.isEmpty) return;
     selectedTab = tabs.firstWhere(
-      (tab) => tab.id == selected,
+      (tab) => tab.id == (android ? selectedSession ?? selected : selected),
       orElse: () => tabs.first,
     );
     for (final tab in tabs) {
@@ -1471,16 +1488,6 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
       ShellPaneState.exited ||
       ShellPaneState.failed => WispColors.error,
     };
-    final screen = MediaQuery.sizeOf(context);
-    final keyboard = MediaQuery.viewInsetsOf(context).bottom;
-    final height = math.min(
-      (screen.height * 0.78).clamp(240.0, 860.0),
-      math.max(
-        160.0,
-        screen.height - keyboard - MediaQuery.paddingOf(context).top - 80,
-      ),
-    );
-
     final terminalIdentity = Row(
       children: [
         WispStatusDot(color: dotColor),
@@ -1551,21 +1558,21 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
             ),
           ),
         ),
-        const SizedBox(width: 6),
-        _HeaderCircleButton(
-          key: const ValueKey('desktop-shell-split-vertical'),
-          tooltip: 'Split side by side',
-          icon: Icons.vertical_split_outlined,
-          onTap: () => workspace.splitActivePane(Axis.horizontal),
-        ),
-        const SizedBox(width: 6),
-        _HeaderCircleButton(
-          key: const ValueKey('desktop-shell-split-horizontal'),
-          tooltip: 'Split top and bottom',
-          icon: Icons.horizontal_split_outlined,
-          onTap: () => workspace.splitActivePane(Axis.vertical),
-        ),
         if (!widget.manager.android) ...[
+          const SizedBox(width: 6),
+          _HeaderCircleButton(
+            key: const ValueKey('desktop-shell-split-vertical'),
+            tooltip: 'Split side by side',
+            icon: Icons.vertical_split_outlined,
+            onTap: () => workspace.splitActivePane(Axis.horizontal),
+          ),
+          const SizedBox(width: 6),
+          _HeaderCircleButton(
+            key: const ValueKey('desktop-shell-split-horizontal'),
+            tooltip: 'Split top and bottom',
+            icon: Icons.horizontal_split_outlined,
+            onTap: () => workspace.splitActivePane(Axis.vertical),
+          ),
           const SizedBox(width: 6),
           _HeaderCircleButton(
             key: const ValueKey('desktop-shell-open-external'),
@@ -1581,25 +1588,28 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
           icon: Icons.remove,
           onTap: _minimize,
         ),
-        const SizedBox(width: 6),
-        _HeaderCircleButton(
-          key: const ValueKey('desktop-shell-terminate'),
-          tooltip: 'Close sessions',
-          icon: Icons.close,
-          onTap: () => unawaited(_confirmClose()),
-        ),
+        if (!widget.manager.android) ...[
+          const SizedBox(width: 6),
+          _HeaderCircleButton(
+            key: const ValueKey('desktop-shell-terminate'),
+            tooltip: 'Close sessions',
+            icon: Icons.close,
+            onTap: () => unawaited(_confirmClose()),
+          ),
+        ],
       ],
     );
     return LayoutBuilder(
       builder: (context, constraints) => SizedBox(
-        height: math.min(height, constraints.maxHeight),
+        height: constraints.maxHeight,
         child: Stack(
           children: [
             Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 LayoutBuilder(
-                  builder: (context, constraints) => constraints.maxWidth < 640
+                  builder: (context, constraints) =>
+                      !widget.manager.android && constraints.maxWidth < 640
                       ? Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
@@ -1637,9 +1647,9 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                             },
                             child: Container(
                               height: 28,
-                              padding: const EdgeInsets.only(
+                              padding: EdgeInsets.only(
                                 left: 10,
-                                right: 6,
+                                right: widget.manager.android ? 10 : 6,
                               ),
                               decoration: BoxDecoration(
                                 color: tab == workspace.selectedTab
@@ -1667,27 +1677,29 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                                           : WispColors.muted,
                                     ),
                                   ),
-                                  const SizedBox(width: 6),
-                                  InkWell(
-                                    key: ValueKey(
-                                      'desktop-shell-close-tab-${tab.id}',
-                                    ),
-                                    borderRadius: BorderRadius.circular(9),
-                                    onTap: () => workspace.closeTab(
-                                      tab,
-                                      terminate: true,
-                                    ),
-                                    child: Padding(
-                                      padding: const EdgeInsets.all(2),
-                                      child: Icon(
-                                        Icons.close,
-                                        size: 13,
-                                        color: tab == workspace.selectedTab
-                                            ? WispColors.text
-                                            : WispColors.muted,
+                                  if (!widget.manager.android) ...[
+                                    const SizedBox(width: 6),
+                                    InkWell(
+                                      key: ValueKey(
+                                        'desktop-shell-close-tab-${tab.id}',
+                                      ),
+                                      borderRadius: BorderRadius.circular(9),
+                                      onTap: () => workspace.closeTab(
+                                        tab,
+                                        terminate: true,
+                                      ),
+                                      child: Padding(
+                                        padding: const EdgeInsets.all(2),
+                                        child: Icon(
+                                          Icons.close,
+                                          size: 13,
+                                          color: tab == workspace.selectedTab
+                                              ? WispColors.text
+                                              : WispColors.muted,
+                                        ),
                                       ),
                                     ),
-                                  ),
+                                  ],
                                 ],
                               ),
                             ),
@@ -1978,7 +1990,7 @@ class _SplitViewport extends StatelessWidget {
             key: ValueKey('desktop-shell-pane-${panes[i].session}'),
             pane: panes[i],
             focused: panes[i] == tab.activePane,
-            showPaneControls: multiple,
+            showPaneControls: multiple && !workspace.android,
             effectiveMode: effectiveMode,
             onKeyboardRequest: onKeyboardRequest,
             onFocus: () {

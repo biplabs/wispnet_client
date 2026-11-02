@@ -88,6 +88,7 @@ void main() {
                 title: 'Computer',
                 showHeader: false,
                 scrollable: false,
+                fillHeight: true,
                 child: DesktopTerminalSheet(
                   manager: manager,
                   workspace: workspace,
@@ -103,6 +104,20 @@ void main() {
     await tester.tap(find.text('Open terminal'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
+    final panel = find.byType(WispPanel).first;
+    expect(tester.getTopLeft(panel).dy, 24);
+    expect(
+      tester.getCenter(find.text('Computer')).dy,
+      closeTo(
+        tester
+            .getCenter(find.byKey(const ValueKey('desktop-shell-mode-button')))
+            .dy,
+        0.01,
+      ),
+    );
+    final closedKeyboardViewportHeight = tester
+        .getSize(find.byType(AndroidView))
+        .height;
     keyboard.value = 300;
     await tester.pumpAndSettle();
     expect(
@@ -111,6 +126,11 @@ void main() {
       300,
     );
     expect(tester.takeException(), isNull);
+    expect(tester.getTopLeft(panel).dy, 24);
+    expect(
+      tester.getSize(find.byType(AndroidView)).height,
+      closeTo(closedKeyboardViewportHeight - 300, 0.01),
+    );
     final shortcut = find.widgetWithText(TextButton, 'Ctrl-C');
     expect(tester.getBottomLeft(shortcut).dy, lessThanOrEqualTo(340));
     expect(tester.getSize(find.byType(AndroidView)).height, greaterThan(0));
@@ -137,7 +157,7 @@ void main() {
 
   for (final width in [360.0, 1000.0]) {
     testWidgets(
-      'Android uses common terminal tabs, splits and input modes at ${width.toInt()}px',
+      'Android uses a single-row header and tabs without split or close controls at ${width.toInt()}px',
       (tester) async {
         final backend = fixture.FakeBackend(shellService: true);
         await fixture.mount(tester, backend, size: Size(width, 844));
@@ -146,16 +166,37 @@ void main() {
         expect(find.byType(DesktopTerminalSheet), findsOneWidget);
         expect(find.byType(AndroidView), findsOneWidget);
         expect(find.byTooltip('Open in system terminal'), findsNothing);
-        await tester.tap(
+        expect(
           find.byKey(const ValueKey('desktop-shell-split-horizontal')),
+          findsNothing,
         );
-        await tester.pumpAndSettle();
-        expect(find.byType(AndroidView), findsNWidgets(2));
+        expect(
+          find.byKey(const ValueKey('desktop-shell-split-vertical')),
+          findsNothing,
+        );
+        expect(
+          find.descendant(
+            of: find.byType(DesktopTerminalSheet),
+            matching: find.byIcon(Icons.close),
+          ),
+          findsNothing,
+        );
+        expect(
+          tester.getCenter(find.text('j-strix')).dy,
+          closeTo(
+            tester
+                .getCenter(
+                  find.byKey(const ValueKey('desktop-shell-mode-button')),
+                )
+                .dy,
+            0.01,
+          ),
+        );
         await tester.tap(find.byKey(const ValueKey('desktop-shell-new-tab')));
         await tester.pumpAndSettle();
         expect(
           backend.calls.where((call) => call.$1 == 'nativeTerminalOpen'),
-          hasLength(3),
+          hasLength(2),
         );
         expect(backend.calls.where((call) => call.$1 == 'shellOpen'), isEmpty);
         await tester.tap(
@@ -180,7 +221,7 @@ void main() {
             'host_name': 'j-strix',
             'service': 'shell',
             'incarnation': fixture.incarnation,
-            'session': 'tab-3',
+            'session': 'tab-2',
             'data': 'echo café 中文\r',
           },
         );
@@ -192,6 +233,7 @@ void main() {
           isEmpty,
         );
         expect(find.byKey(const ValueKey('shell-dock')), findsOneWidget);
+        expect(find.byKey(const ValueKey('shell-dock-close')), findsNothing);
         final layout =
             backend.calls
                     .where((call) => call.$1 == 'saveTerminalLayout')
@@ -210,7 +252,7 @@ void main() {
   }
 
   testWidgets(
-    'Android terminal layout restores tabs, split direction, selection and mode after UI recreation',
+    'Android restores legacy split sessions as separate tabs and rejects new splits',
     (tester) async {
       final backend = NativeTerminalBackend();
       final manager = DesktopShellManager(backend)..android = true;
@@ -221,12 +263,19 @@ void main() {
         incarnation: fixture.incarnation,
       );
       workspace.splitActivePane(Axis.vertical);
+      expect(workspace.selectedTab.panes, hasLength(1));
       workspace.addTab();
       manager.inputMode = DesktopInputMode.line;
       workspace.minimized = true;
       manager.persistLayout();
       await tester.pump();
       final saved = manager.layoutJson();
+      final savedWorkspace = (saved['workspaces'] as List).single as Map;
+      final savedTab = (savedWorkspace['tabs'] as List).first as Map;
+      savedTab['axis'] = 'vertical';
+      savedTab['panes'] = ['main', 'pane-3'];
+      savedTab['active'] = 'pane-3';
+      savedWorkspace['selected'] = 'main';
       manager.closeAll(terminate: false, notify: false);
       manager.dispose();
       expect(
@@ -238,21 +287,24 @@ void main() {
       restored.restoreLayout(saved);
       await tester.pump();
       expect(restored.inputMode, DesktopInputMode.line);
-      expect(restored.minimizedSnapshots.single['session'], 'tab-3');
+      expect(restored.minimizedSnapshots.single['session'], 'pane-3');
       final active = restored.openHost(
         host: fixture.peer,
         hostName: 'Computer',
         service: 'shell',
         incarnation: fixture.incarnation,
-        session: 'tab-3',
+        session: 'pane-3',
       );
-      expect(active.tabs, hasLength(2));
-      expect(active.tabs.first.splitAxis, Axis.vertical);
-      expect(active.tabs.first.panes.map((pane) => pane.session), [
+      expect(active.tabs, hasLength(3));
+      expect(active.tabs.every((tab) => tab.panes.length == 1), isTrue);
+      expect(active.tabs.map((tab) => tab.activePane.session), [
         'main',
-        'pane-2',
+        'pane-3',
+        'tab-2',
       ]);
-      expect(active.activePane.session, 'tab-3');
+      expect(active.activePane.session, 'pane-3');
+      active.splitActivePane(Axis.horizontal);
+      expect(active.selectedTab.panes, hasLength(1));
       active.addTab();
       expect(active.activePane.session, 'tab-4');
       restored.closeAll(terminate: true);
