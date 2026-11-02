@@ -80,6 +80,27 @@ struct Attachment {
     space: Arc<Condvar>,
     id: u64,
 }
+struct EphemeralSession {
+    manager: Arc<ManagerState>,
+    key: SessionKey,
+    session: Arc<Session>,
+}
+impl Drop for EphemeralSession {
+    fn drop(&mut self) {
+        let mut sessions = self
+            .manager
+            .sessions
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if sessions
+            .get(&self.key)
+            .is_some_and(|session| Arc::ptr_eq(session, &self.session))
+        {
+            sessions.remove(&self.key);
+        }
+        self.session.terminate();
+    }
+}
 impl Attachment {
     fn advance(&self, cursor: u64) {
         self.state
@@ -126,8 +147,14 @@ fn default_shell() -> String {
     let shell = std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".into());
     shell
 }
-fn shell_command(shell: &str) -> CommandBuilder {
-    let mut command = CommandBuilder::new(shell);
+fn shell_command(shell: &str, script: Option<&str>) -> CommandBuilder {
+    let mut command = if let Some(script) = script {
+        let mut command = CommandBuilder::new("/bin/sh");
+        command.args(["-c", script]);
+        command
+    } else {
+        CommandBuilder::new(shell)
+    };
     command.env("TERM", "xterm-256color");
     if let Some(home) = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")) {
         let home = std::path::PathBuf::from(home);
@@ -138,6 +165,34 @@ fn shell_command(shell: &str) -> CommandBuilder {
     command
 }
 impl Session {
+    fn signal(&self, name: &str) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            let signal = crate::exec::signal_number(name)?;
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.terminated || state.exited.is_some() {
+                return Ok(());
+            }
+            let master = self.master.lock().unwrap_or_else(|e| e.into_inner());
+            let group = master
+                .process_group_leader()
+                .filter(|group| *group > 0)
+                .ok_or_else(|| error("Terminal process group unavailable"))?;
+            // SAFETY: this is the live foreground group of our owned PTY.
+            if unsafe { libc::kill(-group, signal) } != 0 {
+                let error = io::Error::last_os_error();
+                if error.raw_os_error() != Some(libc::ESRCH) {
+                    return Err(error);
+                }
+            }
+            Ok(())
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = name;
+            Err(error("Terminal signals require a Unix desktop host"))
+        }
+    }
     fn terminate(&self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.terminated {
@@ -148,7 +203,7 @@ impl Session {
         self.space.notify_all();
         let _ = self.termination.send(());
     }
-    fn spawn(shell: &str, cols: u16, rows: u16) -> io::Result<Self> {
+    fn spawn(shell: &str, cols: u16, rows: u16, command: Option<&str>) -> io::Result<Self> {
         let pair = native_pty_system()
             .openpty(PtySize {
                 cols,
@@ -159,7 +214,7 @@ impl Session {
             .map_err(pty_error)?;
         let mut child = pair
             .slave
-            .spawn_command(shell_command(shell))
+            .spawn_command(shell_command(shell, command))
             .map_err(pty_error)?;
         let (termination, termination_rx) = std::sync::mpsc::channel();
         drop(pair.slave);
@@ -339,6 +394,17 @@ impl SessionManager {
         cols: u16,
         rows: u16,
     ) -> io::Result<Arc<Session>> {
+        self.attach_inner(scope, name, cols, rows, false, None)
+    }
+    fn attach_inner(
+        &self,
+        scope: String,
+        name: String,
+        cols: u16,
+        rows: u16,
+        ephemeral: bool,
+        command: Option<&str>,
+    ) -> io::Result<Arc<Session>> {
         if scope.is_empty() || scope.len() > 512 || !valid_session(&name) || !valid_size(cols, rows)
         {
             return Err(error("Invalid shell session"));
@@ -349,6 +415,9 @@ impl SessionManager {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let key = (scope, name);
+        if ephemeral && sessions.contains_key(&key) {
+            return Err(error("Ephemeral session name already in use"));
+        }
         if sessions.get(&key).is_some_and(|s| {
             s.state
                 .lock()
@@ -372,7 +441,7 @@ impl SessionManager {
         if sessions.len() >= MAX_SESSIONS {
             return Err(error("Shell session limit reached"));
         }
-        let session = Arc::new(Session::spawn(&self.inner.shell, cols, rows)?);
+        let session = Arc::new(Session::spawn(&self.inner.shell, cols, rows, command)?);
         sessions.insert(key, session.clone());
         Ok(session)
     }
@@ -386,6 +455,13 @@ impl SessionManager {
         let first = tokio::time::timeout(Duration::from_secs(5), read_client(&mut reader))
             .await
             .map_err(|_| error("Shell attach timeout"))??;
+        if let Some(ClientFrame::ExecStream { command, cwd }) = first {
+            return self
+                .inner
+                .executors
+                .serve_stream(reader, writer, scope, command, cwd)
+                .await;
+        }
         if let Some(ClientFrame::Exec {
             command,
             cwd,
@@ -407,15 +483,45 @@ impl SessionManager {
                 )
                 .await;
         }
-        let Some(ClientFrame::Attach {
-            session: name,
-            cols,
-            rows,
-        }) = first
-        else {
-            return Err(error("First shell request must attach"));
+        let (name, cols, rows, ephemeral, command) = match first {
+            Some(ClientFrame::Attach {
+                session,
+                cols,
+                rows,
+            }) => (session, cols, rows, false, None),
+            Some(ClientFrame::AttachEphemeral {
+                session,
+                cols,
+                rows,
+                command,
+            }) => {
+                if command.as_ref().is_some_and(|command| {
+                    command.is_empty()
+                        || command.len() > crate::MAX_EXEC_COMMAND_BYTES
+                        || command.contains('\0')
+                }) {
+                    return Err(error("Invalid PTY command"));
+                }
+                #[cfg(not(unix))]
+                if command.is_some() {
+                    return Err(error("PTY command execution requires a Unix desktop host"));
+                }
+                (session, cols, rows, true, command)
+            }
+            _ => return Err(error("First shell request must attach or start a command")),
         };
-        let session = match self.attach(scope.clone(), name.clone(), cols, rows) {
+        let session = match if ephemeral {
+            self.attach_inner(
+                scope.clone(),
+                name.clone(),
+                cols,
+                rows,
+                true,
+                command.as_deref(),
+            )
+        } else {
+            self.attach(scope.clone(), name.clone(), cols, rows)
+        } {
             Ok(s) => s,
             Err(e) => {
                 send_frame(
@@ -429,6 +535,11 @@ impl SessionManager {
             }
         };
         let session_key = (scope, name.clone());
+        let _ephemeral = ephemeral.then(|| EphemeralSession {
+            manager: self.inner.clone(),
+            key: session_key.clone(),
+            session: session.clone(),
+        });
         send_frame(
             &mut writer,
             &ServerFrame::Attached {
@@ -508,6 +619,28 @@ impl SessionManager {
                         match input_session.resize(cols, rows) {
                             Ok(()) => continue,
                             Err(e) => Err(e),
+                        }
+                    }
+                    Ok(Some(ClientFrame::Signal { name })) => match input_session.signal(&name) {
+                        Ok(()) => continue,
+                        Err(e) => Err(e),
+                    },
+                    Ok(Some(ClientFrame::StdinEof)) => {
+                        // A PTY cannot half-close its input; EOT asks a canonical
+                        // terminal to deliver EOF, just as typing Ctrl+D does.
+                        let session = input_session.clone();
+                        match tokio::task::spawn_blocking(move || {
+                            session
+                                .writer
+                                .lock()
+                                .unwrap_or_else(|e| e.into_inner())
+                                .write_all(&[4])
+                        })
+                        .await
+                        {
+                            Ok(Ok(())) => continue,
+                            Ok(Err(e)) => Err(e),
+                            Err(_) => Err(error("Shell input worker failed")),
                         }
                     }
                     frame => frame,
@@ -644,6 +777,93 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+    #[tokio::test]
+    async fn ephemeral_pty_command_preserves_output_and_exit_then_removes_session() {
+        let manager = SessionManager::with_shell("/bin/sh");
+        let (mut client, server) = tokio::io::duplex(4096);
+        let host = manager.clone();
+        let worker = tokio::spawn(async move { host.serve(server, "ephemeral/peer".into()).await });
+        write_client(
+            &mut client,
+            &ClientFrame::AttachEphemeral {
+                session: "unique".into(),
+                cols: 73,
+                rows: 21,
+                command: Some("stty size; printf 'EPHEMERAL_COMMAND'; exit 9".into()),
+            },
+        )
+        .await
+        .unwrap();
+        let (output, code) = tokio::time::timeout(Duration::from_secs(5), async {
+            let mut output = Vec::new();
+            loop {
+                match read_server(&mut client).await.unwrap().unwrap() {
+                    ServerFrame::Output { data } | ServerFrame::Scrollback { data } => {
+                        output.extend(data)
+                    }
+                    ServerFrame::Exited { code } => break (output, code),
+                    ServerFrame::Error { message } => panic!("{message}"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(code, 9);
+        let output = String::from_utf8(output).unwrap();
+        assert!(output.contains("21 73"), "{output}");
+        assert!(output.contains("EPHEMERAL_COMMAND"), "{output}");
+        drop(client);
+        worker.await.unwrap().unwrap();
+        assert!(manager.inner.sessions.lock().unwrap().is_empty());
+    }
+    #[tokio::test]
+    async fn ephemeral_pty_disconnect_and_task_abort_terminate_session() {
+        for abort in [false, true] {
+            let manager = SessionManager::with_shell("/bin/sh");
+            let (mut client, server) = tokio::io::duplex(4096);
+            let host = manager.clone();
+            let worker =
+                tokio::spawn(async move { host.serve(server, "ephemeral/peer".into()).await });
+            write_client(
+                &mut client,
+                &ClientFrame::AttachEphemeral {
+                    session: "unique".into(),
+                    cols: 80,
+                    rows: 24,
+                    command: Some("printf 'EPHEMERAL_READY'; sleep 30".into()),
+                },
+            )
+            .await
+            .unwrap();
+            output_until(&mut client, "EPHEMERAL_READY").await;
+            let session = manager
+                .inner
+                .sessions
+                .lock()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()
+                .clone();
+            if abort {
+                worker.abort();
+                assert!(worker.await.is_err());
+                drop(client);
+            } else {
+                drop(client);
+                worker.await.unwrap().unwrap();
+            }
+            assert!(manager.inner.sessions.lock().unwrap().is_empty());
+            tokio::time::timeout(Duration::from_secs(3), async {
+                while session.state.lock().unwrap().exited.is_none() {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+        }
     }
     #[tokio::test]
     async fn persistent_shell_resize_and_explicit_exit() {

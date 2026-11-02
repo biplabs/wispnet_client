@@ -5,6 +5,9 @@ It runs the host account's default shell in a PTY over Wispnet's existing Iroh
 connection. SSH and a separate shell daemon are not required. Android accesses
 desktop shells; it does not offer a host shell from the application sandbox.
 
+The optional [local SSH adapter](ssh-adapter.md) lets OpenSSH-based tools use
+the same native Shell service through an SSH configuration alias.
+
 The built-in service is always present and available to the local owner. New
 hosts grant no remote shell access. Pairing alone does not grant access: select
 Shell when approving a device or edit Shell's permitted devices afterwards.
@@ -56,6 +59,13 @@ wispnet shell-access --allow none
 Grant changes replace the allow list using the reviewed host revision. Only
 already approved devices can be selected. Shell access runs with the host
 account's permissions.
+
+On Linux, the host service allows `sudo` according to the host account's normal
+sudo policy. It must run with `NoNewPrivileges=false`; setting it to `true`
+blocks privilege changes in every shell it starts. After changing this service
+setting, run `systemctl --user daemon-reload` followed by
+`systemctl --user restart wispnet-host.service`, then open a new shell session.
+Existing sessions end when the host service restarts.
 
 MCP clients can add a device without replacing other grants by calling
 `wispnet_grant_service_access` with `service: "shell"`, the paired device's

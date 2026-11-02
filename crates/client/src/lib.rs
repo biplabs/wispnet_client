@@ -9,6 +9,7 @@ pub mod public_access;
 mod service_registry;
 mod shell;
 mod shell_exec;
+mod shell_stream;
 use iroh::Endpoint;
 use serde_json::{Value, json};
 use std::{

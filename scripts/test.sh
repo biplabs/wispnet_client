@@ -38,6 +38,7 @@ python3 -m unittest discover -s scripts -p test_mcp.py
 python3 -m unittest discover -s scripts -p test_mcp_exec.py
 python3 scripts/test_node_desktop.py
 python3 scripts/shell_smoke.py
+python3 scripts/ssh_smoke.py
 python3 scripts/files_smoke.py
 python3 scripts/test_mutual_deletion.py
 uv run --with pyte==0.8.2 --with zxing-cpp==2.3.0 --with pillow==11.3.0 python scripts/test_tui.py

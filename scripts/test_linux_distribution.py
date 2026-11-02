@@ -205,6 +205,57 @@ class DistributionTests(unittest.TestCase):
         )
         self.assertEqual(json.loads(result.stdout), [])
 
+    def test_unit_only_upgrade_restarts_existing_node(self):
+        self.install()
+        self.initialize()
+        before = self.status()
+        unit = self.home / ".config/systemd/user/wispnet-host.service"
+        unit.write_text("[Service]\nNoNewPrivileges=true\n")
+        tools = self.root / "tools"
+        tools.mkdir()
+        calls = self.root / "systemctl.jsonl"
+        systemctl = tools / "systemctl"
+        systemctl.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, sys\n"
+            f"with open({str(calls)!r}, 'a') as output:\n"
+            "    output.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+        )
+        systemctl.chmod(0o755)
+        self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
+        daemon = subprocess.Popen(
+            [str(self.installed), "agent", "--config", str(self.config)],
+            env=self.env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        try:
+            deadline = time.monotonic() + 10
+            while not (self.state / "node.sock").exists():
+                self.assertIsNone(daemon.poll())
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(0.05)
+            for changed in (True, False):
+                calls.write_text("")
+                self.run_command(
+                    sys.executable,
+                    str(self.bundle / "scripts/install_node_desktop.py"),
+                    "--headless",
+                )
+                requests = [json.loads(line) for line in calls.read_text().splitlines()]
+                self.assertEqual(
+                    requests.count(["--user", "restart", "wispnet-host.service"]),
+                    int(changed),
+                )
+                self.assertEqual(
+                    unit.read_bytes(),
+                    (self.bundle / "deploy/node/wispnet-host.service").read_bytes(),
+                )
+                self.assertEqual(self.status(), before)
+        finally:
+            daemon.terminate()
+            daemon.wait(timeout=10)
+
     def test_corrupt_payload_is_rejected_before_install_mutation(self):
         self.install()
         self.initialize()

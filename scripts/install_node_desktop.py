@@ -92,7 +92,11 @@ if legacy_config.exists() and not config.exists():
 units = home / ".config/systemd/user"
 units.mkdir(parents=True, exist_ok=True)
 node_unit = units / "wispnet-host.service"
-shutil.copy2(ROOT / "deploy/node/wispnet-host.service", node_unit)
+node_unit_source = ROOT / "deploy/node/wispnet-host.service"
+node_unit_changed = not node_unit.exists() or not filecmp.cmp(
+    node_unit_source, node_unit, shallow=False
+)
+shutil.copy2(node_unit_source, node_unit)
 node_binary = home / ".local/libexec/wispnet-node/wispnet"
 node_binary.parent.mkdir(parents=True, exist_ok=True)
 node_changed = not node_binary.exists() or not filecmp.cmp(
@@ -138,6 +142,7 @@ if not args.no_start:
     )
 if not args.no_start and (
     node_changed
+    or node_unit_changed
     or subprocess.run(
         ["systemctl", "--user", "is-active", "--quiet", "wispnet-host.service"]
     ).returncode

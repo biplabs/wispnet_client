@@ -26,10 +26,22 @@ pub enum ClientFrame {
         timeout_ms: u32,
         max_output_bytes: u32,
     },
+    /// Full-duplex process channel; its lifetime belongs to this connection.
+    ExecStream {
+        command: String,
+        cwd: Option<String>,
+    },
     Attach {
         session: String,
         cols: u16,
         rows: u16,
+    },
+    /// A PTY that is terminated when this connection ends, rather than retained.
+    AttachEphemeral {
+        session: String,
+        cols: u16,
+        rows: u16,
+        command: Option<String>,
     },
     Input {
         data: Vec<u8>,
@@ -38,6 +50,10 @@ pub enum ClientFrame {
         cols: u16,
         rows: u16,
     },
+    StdinEof,
+    Signal {
+        name: String,
+    },
     Detach,
     Terminate,
     Ping,
@@ -45,6 +61,7 @@ pub enum ClientFrame {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ServerFrame {
+    ExecStarted,
     Attached {
         session: String,
         username: String,

@@ -6,7 +6,8 @@ Wants=network-online.target
 ExecStart=/usr/bin/wispnet agent --config %h/.config/wispnet-node/host.toml
 Restart=on-failure
 RestartSec=3
-NoNewPrivileges=true
+# Shell sessions must be able to use sudo under the host account's policy.
+NoNewPrivileges=false
 UMask=0077
 [Install]
 WantedBy=default.target

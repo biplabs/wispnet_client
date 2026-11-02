@@ -14,18 +14,18 @@ use wispnet_shell::{
     read_server, write_client,
 };
 
-trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
+pub(crate) trait Stream: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> Stream for T {}
-type BoxStream = Box<dyn Stream>;
+pub(crate) type BoxStream = Box<dyn Stream>;
 pub(crate) struct Cancellation {
     pub(crate) host: EndpointId,
     pub(crate) cancel: watch::Sender<bool>,
 }
 pub(crate) type ExecRegistry = Arc<Mutex<BTreeMap<String, Cancellation>>>;
 
-struct Registration {
-    id: String,
-    registry: ExecRegistry,
+pub(crate) struct Registration {
+    pub(crate) id: String,
+    pub(crate) registry: ExecRegistry,
 }
 impl Drop for Registration {
     fn drop(&mut self) {
@@ -42,7 +42,7 @@ impl Drop for Registration {
 }
 
 #[derive(Default)]
-struct Resources {
+pub(crate) struct Resources {
     connection: Option<Connection>,
     local: Option<JoinHandle<()>>,
 }
@@ -140,7 +140,7 @@ fn named_host(
 }
 
 impl Client {
-    async fn exec_host(&self, target: &str) -> Result<EndpointId, String> {
+    pub(crate) async fn exec_host(&self, target: &str) -> Result<EndpointId, String> {
         let own = self.endpoint.id();
         let host = if let Ok(host) = target.parse() {
             host
@@ -243,7 +243,7 @@ impl Client {
         };
         tokio::select! { result = receive => result, result = pairing => result }
     }
-    async fn open_exec_stream(
+    pub(crate) async fn open_exec_stream(
         self: &Arc<Self>,
         host: EndpointId,
         resources: &mut Resources,

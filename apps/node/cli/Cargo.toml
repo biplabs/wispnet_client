@@ -6,7 +6,12 @@ license.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+default = ["ssh-adapter"]
+ssh-adapter = ["dep:wispnet-ssh-adapter"]
+
 [dependencies]
+wispnet-ssh-adapter = { path = "../../../crates/ssh-adapter", optional = true }
 serde_json = "=1.0.150"
 toml.workspace = true
 wispnet-core.workspace = true

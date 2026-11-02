@@ -29,6 +29,16 @@ Tunnel mode relays raw stdin/stdout. It is not a browser gateway. Independent ho
 
 fn main() -> ExitCode {
     let shell_args: Vec<_> = env::args_os().skip(1).collect();
+    #[cfg(feature = "ssh-adapter")]
+    if shell_args.first().is_some_and(|a| a == "ssh-bridge") {
+        return match wispnet_ssh_adapter::run_args(&shell_args[1..]) {
+            Ok(code) => ExitCode::from(code.min(255) as u8),
+            Err(error) => {
+                eprintln!("wispnet: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     if shell_args.first().is_some_and(|a| a == "files") {
         return match files::run_args(&shell_args[1..]) {
             Ok(code) => ExitCode::from(code.min(255) as u8),
@@ -106,6 +116,8 @@ async fn execute() -> Result<(), Box<dyn std::error::Error>> {
             shell::HELP,
             files::HELP
         );
+        #[cfg(feature = "ssh-adapter")]
+        println!("\n{}", wispnet_ssh_adapter::HELP);
         return Ok(());
     }
     if args

@@ -287,6 +287,10 @@ async fn serve(mut stream: UnixStream, state: Arc<State>) {
     })
     .await;
     let result = match request {
+        Ok(Ok(value)) if value["op"] == "shell_stream" => {
+            serve_shell_stream(stream, state, value).await;
+            return;
+        }
         Ok(Ok(value)) => {
             let remaining = request_timeout(&value).saturating_sub(started.elapsed());
             tokio::time::timeout(remaining, state.request(value))
@@ -304,6 +308,45 @@ async fn serve(mut stream: UnixStream, state: Arc<State>) {
         bytes.push(b'\n');
         let _ =
             tokio::time::timeout(std::time::Duration::from_secs(5), stream.write_all(&bytes)).await;
+    }
+}
+
+/// Upgrade this owner-only connection to the native binary Shell protocol.
+/// Optional frontends never read identity secrets or create another endpoint.
+async fn serve_shell_stream(mut stream: UnixStream, state: Arc<State>, value: Value) {
+    let opened = async {
+        let host = value["host"]
+            .as_str()
+            .ok_or("Missing host pin")?
+            .parse::<wispnet_core::identity::EndpointId>()
+            .map_err(|_| "Invalid host pin")?;
+        let native = state.client.open_shell_stream(host).await?;
+        Ok::<_, String>((host, native))
+    };
+    let opened = tokio::time::timeout(std::time::Duration::from_secs(20), opened)
+        .await
+        .unwrap_or_else(|_| Err("Shell stream setup timed out".into()));
+    let (response, native) = match opened {
+        Ok((host, native)) => (json!({"ok":true,"result":{"host":host}}), Some(native)),
+        Err(error) => (json!({"ok":false,"error":error}), None),
+    };
+    let mut bytes = serde_json::to_vec(&response).expect("JSON response");
+    bytes.push(b'\n');
+    if !matches!(
+        tokio::time::timeout(std::time::Duration::from_secs(5), stream.write_all(&bytes)).await,
+        Ok(Ok(()))
+    ) {
+        return;
+    }
+    if let Some(mut native) = native {
+        let (mut local_read, mut local_write) = stream.split();
+        let (mut native_read, mut native_write) = tokio::io::split(&mut native);
+        // Shell has explicit StdinEof. A closed owner socket cancels the whole
+        // stream, including a process blocked on input or an idle output pipe.
+        tokio::select! {
+            _ = tokio::io::copy(&mut local_read, &mut native_write) => {},
+            _ = tokio::io::copy(&mut native_read, &mut local_write) => {},
+        }
     }
 }
 

@@ -295,6 +295,7 @@ impl Client {
                         }
                         ServerFrame::Pong => continue,
                         ServerFrame::Attached { .. }
+                        | ServerFrame::ExecStarted
                         | ServerFrame::Stdout { .. }
                         | ServerFrame::Stderr { .. }
                         | ServerFrame::ExecFinished { .. } => {
