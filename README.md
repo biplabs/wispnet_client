@@ -1,20 +1,20 @@
 # Wispnet
 
-This is the **client project** (desktop, Android, CLI and TUI). The folder and
-repository remain named `wispnet` for now; a later rename to `wispnet_client` is
-planned. Server infrastructure lives independently in the sibling
+This is the **client project** (desktop, Android, CLI and TUI), in the
+[`wispnet_client`](https://github.com/biplabs/wispnet_client) repository and local
+`wispnet_client` folder. Server infrastructure lives independently in the sibling
 [`wispnet_server`](../wispnet_server/README.md) project. Neither workspace needs
 the other to build or run its normal tests.
 
 **Your services. Any device. Wherever you are.**
 
-Project domain: **`wispnet.app`** · [v1 roadmap](https://github.com/biplabs/wispnet/issues/1) · [Implementation issues](https://github.com/biplabs/wispnet/issues)
+Project domain: **`wispnet.app`** · [v1 roadmap](https://github.com/biplabs/wispnet_client/issues/1) · [Implementation issues](https://github.com/biplabs/wispnet_client/issues)
 
 Wispnet brings your self-hosted services into one directory and makes them accessible from your computers and phone, without tracking machine IP addresses or manually forwarding each service through your home router.
 
 > **Every host owns its services and permissions. There is no master node. The cloud is disposable.** Machine 1 is authoritative for Machine 1; Machine 2 is authoritative for Machine 2. Devices assemble trusted service information into a shared directory view. The cloud supplies only a transient connection relay, not a registry or authorization database.
 
-> **Status: development implementation.** An installable native Android app now provides independent host pairing, an aggregated service directory, Start/Stop browser access, and normal-browser handoff. See the [Android build and usage guide](docs/android-app.md). Full lifecycle, network-transition, and gateway release acceptance remain tracked in [#12](https://github.com/biplabs/wispnet/issues/12) and [#10](https://github.com/biplabs/wispnet/issues/10); this is not a production-ready v1 release. [ADR 0002](docs/decisions/0002-per-host-authority.md) records the architecture.
+> **Status: development implementation.** An installable native Android app now provides independent host pairing, an aggregated service directory, Start/Stop browser access, and normal-browser handoff. See the [Android build and usage guide](docs/android-app.md). Full lifecycle, network-transition, and gateway release acceptance remain tracked in [#12](https://github.com/biplabs/wispnet_client/issues/12) and [#10](https://github.com/biplabs/wispnet_client/issues/10); this is not a production-ready v1 release. [ADR 0002](docs/decisions/0002-per-host-authority.md) records the architecture.
 
 ## Repository layout
 
@@ -39,7 +39,7 @@ See [the split guide](docs/project-split.md) for ownership and validation.
 
 [Linux desktop/tray setup](docs/linux-desktop.md) · [macOS app](docs/macos-desktop.md). Installed service names, state paths and Android package ID stay unchanged by the source reorganization.
 
-Download the [development release](https://github.com/biplabs/wispnet/releases/tag/development)
+Download the [development release](https://github.com/biplabs/wispnet_client/releases/tag/development)
 for Linux x86_64 or macOS (Apple Silicon and Intel), including the node/CLI,
 Flutter desktop and installer. GitHub Actions refreshes this prerelease after
 successful builds of `main`; see the [Linux bundle guide](docs/linux-distribution.md)
@@ -165,7 +165,7 @@ An invitation identifies the **target host**, its pinned EndpointId, the configu
 
 The owner may use one UI to add or revoke a phone across several hosts, but each target applies its own authorized operation. The UI must show per-host results, including pending/offline targets. A newly initialized phone can pair directly with Machine 2 while Machine 1 is absent, provided the owner approves at Machine 2.
 
-**An offline host cannot apply a revocation it has not received.** The product must not report a mesh-wide revoke as complete until every selected host has confirmed it. Peer discovery, matching display names, a shared relay, or possession of an old invitation never creates transitive trust. v1 uses direct host approval rather than a mandatory central membership authority. See [#17](https://github.com/biplabs/wispnet/issues/17).
+**An offline host cannot apply a revocation it has not received.** The product must not report a mesh-wide revoke as complete until every selected host has confirmed it. Peer discovery, matching display names, a shared relay, or possession of an old invitation never creates transitive trust. v1 uses direct host approval rather than a mandatory central membership authority. See [#17](https://github.com/biplabs/wispnet_client/issues/17).
 
 ## How known peers find each other
 
@@ -185,7 +185,7 @@ Direct hints:  optional; current peer IP is not required for relay reachability
 
 The target establishes an outbound connection to the configured relay. The sender uses the target ID and relay address to establish an authenticated connection, with direct peer paths attempted where available. The relay's live connection table supplies reachability, not a service catalog or permission decision. The target must be online and reachable for access to work.
 
-Use the same addressing mechanism for pairing, catalog synchronization, and service access. No discovery request to Machine 1 is required before contacting Machine 2. The implementation must not depend on a cloud EndpointId-to-IP database, public Pkarr/DHT publication, gossip, or default public relays. Ordinary DNS lookup of the configured relay hostname is allowed. See [#13](https://github.com/biplabs/wispnet/issues/13).
+Use the same addressing mechanism for pairing, catalog synchronization, and service access. No discovery request to Machine 1 is required before contacting Machine 2. The implementation must not depend on a cloud EndpointId-to-IP database, public Pkarr/DHT publication, gossip, or default public relays. Ordinary DNS lookup of the configured relay hostname is allowed. See [#13](https://github.com/biplabs/wispnet_client/issues/13).
 
 ## Cloud is purely transient and disposable
 
@@ -197,13 +197,13 @@ The required recovery test is to destroy the isolated test relay and disk, rebui
 
 **Transient is not literally zero runtime state.** A relay necessarily handles sockets, encrypted packets, and temporary routing information. Connection identities, addresses, timing, and traffic volume may be visible. Disable payload capture and unnecessary persistent peer metadata. Keep infrastructure configuration, DNS/domain control, TLS provisioning, and any admission/resource-limit configuration recoverable outside the disposable VM. These are infrastructure requirements, not service authorization.
 
-**Disposable is not uninterrupted.** Relay-dependent streams may fail, and some new connections may be unavailable until recovery. Re-resolve DNS and reconnect with bounded backoff; never silently replay a request that may have changed backend state. Relay replacement must not alter trusted host pins or grants. [#18](https://github.com/biplabs/wispnet/issues/18) and [#14](https://github.com/biplabs/wispnet/issues/14) require these tests. A future relay fleet should preserve independent peer identities and per-host authority.
+**Disposable is not uninterrupted.** Relay-dependent streams may fail, and some new connections may be unavailable until recovery. Re-resolve DNS and reconnect with bounded backoff; never silently replay a request that may have changed backend state. Relay replacement must not alter trusted host pins or grants. [#18](https://github.com/biplabs/wispnet_client/issues/18) and [#14](https://github.com/biplabs/wispnet_client/issues/14) require these tests. A future relay fleet should preserve independent peer identities and per-host authority.
 
 ## Durable state and recovery belong to each host
 
 Back up **each host's** identity, local registry/policy database, administration credentials, service configuration, and recovery/version metadata on protected owner-controlled storage outside the relay. Client directory caches are rebuildable views, not backups of another machine's authority or keys.
 
-Restoring Machine 1 must not reset Machine 2, require its approval, or block it operating. Restore a host under its original identity only with the appropriate protected recovery material; lost or compromised keys require explicit trust repair. A stale backup cannot reveal revocations that happened after it was taken. Recovery must reconcile those decisions or fail closed rather than silently restore old access. Do not clone the same active host identity onto two independent writers. See [#19](https://github.com/biplabs/wispnet/issues/19).
+Restoring Machine 1 must not reset Machine 2, require its approval, or block it operating. Restore a host under its original identity only with the appropriate protected recovery material; lost or compromised keys require explicit trust repair. A stale backup cannot reveal revocations that happened after it was taken. Recovery must reconcile those decisions or fail closed rather than silently restore old access. Do not clone the same active host identity onto two independent writers. See [#19](https://github.com/biplabs/wispnet_client/issues/19).
 
 ## Browser and application security
 
@@ -211,20 +211,20 @@ The [browser spike](experiments/browser/README.md), [ADR 0001](docs/decisions/00
 
 Bind gateways only to loopback, enforce device pairing and host/service grants, validate exact Host and appropriate Origin/Fetch Metadata, and protect WebSocket upgrades. Browser pages and APIs require no Wispnet cookie or launch token. Different ports are not cookie isolation. Local service origins must be bound to the full host/service identity, so two peers publishing `llama` cannot collide or share application cookies.
 
-Production cookie-prefix/Secure-cookie, HTTPS, hostname reuse, redirect/login, service-worker, streaming, and Android handoff decisions remain release requirements in [#10](https://github.com/biplabs/wispnet/issues/10). A directory entry or authenticated device connection is not proof of the human user's intent. Backend applications may still require their own authentication.
+Production cookie-prefix/Secure-cookie, HTTPS, hostname reuse, redirect/login, service-worker, streaming, and Android handoff decisions remain release requirements in [#10](https://github.com/biplabs/wispnet_client/issues/10). A directory entry or authenticated device connection is not proof of the human user's intent. Backend applications may still require their own authentication.
 
 `wispnet.app` names the project; it does not require public service subdomains, a cloud application proxy, or public HTTPS controllers at home. Browser HTTPS and relay TLS are separate from host registry transport.
 
 ## v1 roadmap
 
-[Issue #1](https://github.com/biplabs/wispnet/issues/1) tracks the accepted architecture. Existing completed foundations remain useful; their completion does not prove the per-host migration has shipped.
+[Issue #1](https://github.com/biplabs/wispnet_client/issues/1) tracks the accepted architecture. Existing completed foundations remain useful; their completion does not prove the per-host migration has shipped.
 
 | Workstream | Tasks |
 | --- | --- |
-| Foundations | [#2 Browser spike](https://github.com/biplabs/wispnet/issues/2), [#3 Workspace/local checks](https://github.com/biplabs/wispnet/issues/3), [#4 Identities](https://github.com/biplabs/wispnet/issues/4), [#5 Tunnel](https://github.com/biplabs/wispnet/issues/5), [#6 Registry foundation](https://github.com/biplabs/wispnet/issues/6), [#7 Enrollment foundation](https://github.com/biplabs/wispnet/issues/7) |
-| Independent hosts and connectivity | [#16 Per-host registry/control](https://github.com/biplabs/wispnet/issues/16), [#13 Known-peer relay transport](https://github.com/biplabs/wispnet/issues/13), [#17 Pairwise approval](https://github.com/biplabs/wispnet/issues/17), [#18 Disposable relay](https://github.com/biplabs/wispnet/issues/18) |
-| Shared directory and access | [#8 Host-owned service records](https://github.com/biplabs/wispnet/issues/8), [#9 Catalog synchronization and host-local enforcement](https://github.com/biplabs/wispnet/issues/9), [#10 Browser/API gateway](https://github.com/biplabs/wispnet/issues/10), [#11 Linux directory](https://github.com/biplabs/wispnet/issues/11), [#12 Mandatory Android app](https://github.com/biplabs/wispnet/issues/12) |
-| Recovery and release | [#19 Per-host backup/recovery](https://github.com/biplabs/wispnet/issues/19), [#14 Independence/security/recovery tests](https://github.com/biplabs/wispnet/issues/14), [#15 Packaging/documentation](https://github.com/biplabs/wispnet/issues/15) |
+| Foundations | [#2 Browser spike](https://github.com/biplabs/wispnet_client/issues/2), [#3 Workspace/local checks](https://github.com/biplabs/wispnet_client/issues/3), [#4 Identities](https://github.com/biplabs/wispnet_client/issues/4), [#5 Tunnel](https://github.com/biplabs/wispnet_client/issues/5), [#6 Registry foundation](https://github.com/biplabs/wispnet_client/issues/6), [#7 Enrollment foundation](https://github.com/biplabs/wispnet_client/issues/7) |
+| Independent hosts and connectivity | [#16 Per-host registry/control](https://github.com/biplabs/wispnet_client/issues/16), [#13 Known-peer relay transport](https://github.com/biplabs/wispnet_client/issues/13), [#17 Pairwise approval](https://github.com/biplabs/wispnet_client/issues/17), [#18 Disposable relay](https://github.com/biplabs/wispnet_client/issues/18) |
+| Shared directory and access | [#8 Host-owned service records](https://github.com/biplabs/wispnet_client/issues/8), [#9 Catalog synchronization and host-local enforcement](https://github.com/biplabs/wispnet_client/issues/9), [#10 Browser/API gateway](https://github.com/biplabs/wispnet_client/issues/10), [#11 Linux directory](https://github.com/biplabs/wispnet_client/issues/11), [#12 Mandatory Android app](https://github.com/biplabs/wispnet_client/issues/12) |
+| Recovery and release | [#19 Per-host backup/recovery](https://github.com/biplabs/wispnet_client/issues/19), [#14 Independence/security/recovery tests](https://github.com/biplabs/wispnet_client/issues/14), [#15 Packaging/documentation](https://github.com/biplabs/wispnet_client/issues/15) |
 
 Start per-host control/storage and explicit-relay transport first, then integrate pairing, registration, and synchronization. Android scaffolding and relay deployment can proceed in parallel. Feature tests accompany implementation; final end-to-end validation is not a prerequisite to starting those features.
 

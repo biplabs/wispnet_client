@@ -262,7 +262,7 @@ has granted this device Shell access:
   "arguments": {
     "host": "j-desktop",
     "command": "pwd; git status --short",
-    "cwd": "/home/johnny/playground/wispnet"
+    "cwd": "/home/johnny/playground/wispnet_client"
   }
 }
 ```

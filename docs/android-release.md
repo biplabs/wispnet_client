@@ -1,7 +1,7 @@
 # Android internal-testing build
 
 Internal Play publishing and a real Play-phone optical scan/pending owner approval are recorded in
-[issue #17](https://github.com/biplabs/wispnet/issues/17). Camera-free code, invitation-file and QR-image paths are also implemented. See [app camera evidence](android-app.md#automatic-camera-qr-pairing) and the dated publishing checkpoint below; real-phone browser/lifecycle and broader #12/#10 acceptance remain open. Earlier preparation sections retain their dated scope.
+[issue #17](https://github.com/biplabs/wispnet_client/issues/17). Camera-free code, invitation-file and QR-image paths are also implemented. See [app camera evidence](android-app.md#automatic-camera-qr-pairing) and the dated publishing checkpoint below; real-phone browser/lifecycle and broader #12/#10 acceptance remain open. Earlier preparation sections retain their dated scope.
 
 ## Build and inspect
 
@@ -65,7 +65,7 @@ The rebuilt API 36-targeted debug APK, using byte-for-byte the optimized ARM nat
 
 ## Configured signing and your first Console upload
 
-A separate Wispnet upload key is now configured locally at `~/.config/wispnet/play-upload-keystore.p12`, with a private mode-0600 `~/.config/wispnet/play-upload.env`. WispShell's key and workflows were inspected but not changed. Wispnet's four signing secrets are configured in `biplabs/wispnet`; the Google publisher credential still needs to be supplied. Keep a private backup of the keystore and its environment file together.
+A separate Wispnet upload key is now configured locally at `~/.config/wispnet/play-upload-keystore.p12`, with a private mode-0600 `~/.config/wispnet/play-upload.env`. WispShell's key and workflows were inspected but not changed. Wispnet's four signing secrets are configured in `biplabs/wispnet_client`; the Google publisher credential still needs to be supplied. Keep a private backup of the keystore and its environment file together.
 
 A preserved copy at `target/play-internal/wispnet-app.wispnet.android-v1-signed.aab` (also in `apps/flutter/build/app/outputs/bundle/release/app-release.aab`) is **signed**, version code **1**, package **app.wispnet.android**, and passed the signature/native/bundle checks. Earlier unsigned artifacts described above were the preceding checkpoint.
 
@@ -82,10 +82,10 @@ Do these steps in your Play Console account:
 2. Open **Test and release → Testing → Internal testing**, create a release, enable/configure Play App Signing, and upload `target/play-internal/wispnet-app.wispnet.android-v1-signed.aab`. Complete any blocking tasks the Console displays, then roll out to internal testing. This is an internal testing track, not Internal app sharing or production. Internal tests can start before the full store listing is complete; see [Google's internal-testing instructions](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en).
 3. Under **Internal testing → Testers**, add the Google account used on the tablet/phone, save the tester list and copy its opt-in link. Open that link while signed into the tester account, opt in and install from Play. A different Play certificate cannot update the existing debug-signed tablet app in place; the existing installation has not been removed. Switching that tablet requires a deliberate fresh install and new independent host approvals.
 4. For later automated uploads, grant the existing WispShell publishing service account access to **Wispnet**, including app visibility and release-to-testing permission. Reuse the Google Cloud project where Play Developer API is already enabled. In Google Cloud, obtain the original service-account JSON you kept, or create an additional JSON key for that same service account if the original is unavailable. Download a new JSON key through **Google Cloud Console → IAM & Admin → Service Accounts → [the publishing account] → Keys → Add key → Create new key → JSON** ([Google instructions](https://docs.cloud.google.com/iam/docs/keys-create-delete)). GitHub does not reveal an existing secret's value. Do not put the JSON in this repo or chat.
-5. Add that raw JSON as `ANDROID_PUBLISHER_CREDENTIALS` in **biplabs/wispnet → Settings → Secrets and variables → Actions → Repository secrets**. The four `WISPNET_UPLOAD_*` signing secrets are already installed; do not replace them with WispShell's key. Alternatively, from the local machine:
+5. Add that raw JSON as `ANDROID_PUBLISHER_CREDENTIALS` in **biplabs/wispnet_client → Settings → Secrets and variables → Actions → Repository secrets**. The four `WISPNET_UPLOAD_*` signing secrets are already installed; do not replace them with WispShell's key. Alternatively, from the local machine:
 
    ```sh
-   gh secret set ANDROID_PUBLISHER_CREDENTIALS --repo biplabs/wispnet < /private/play-service-account.json
+   gh secret set ANDROID_PUBLISHER_CREDENTIALS --repo biplabs/wispnet_client < /private/play-service-account.json
    ```
 
 Google's [Publisher API setup](https://developers.google.com/android-publisher/getting_started) describes service-account access through Play Console Users and permissions. The first app/Console setup and credential grant are user-managed here. No upload has been claimed successful before a committed, verified track response.
@@ -98,12 +98,12 @@ After first Console setup and the publisher secret:
 
 ```sh
 # Default next version: 1000 + workflow run number.
-gh workflow run play-internal.yml --repo biplabs/wispnet
+gh workflow run play-internal.yml --repo biplabs/wispnet_client
 # For an app still requiring draft releases:
-gh workflow run play-internal.yml --repo biplabs/wispnet -f release_status=draft
+gh workflow run play-internal.yml --repo biplabs/wispnet_client -f release_status=draft
 ```
 
-Automatic upload on relevant `main` pushes is initially disabled. To opt in after the first successful manual workflow, set repository variable `WISPNET_PLAY_AUTO_UPLOAD=true` (or `gh variable set WISPNET_PLAY_AUTO_UPLOAD --repo biplabs/wispnet --body true`). Publishing jobs serialize; version codes are configurable and monotonic by default. A manually supplied code must be unused and higher than earlier uploads.
+Automatic upload on relevant `main` pushes is initially disabled. To opt in after the first successful manual workflow, set repository variable `WISPNET_PLAY_AUTO_UPLOAD=true` (or `gh variable set WISPNET_PLAY_AUTO_UPLOAD --repo biplabs/wispnet_client --body true`). Publishing jobs serialize; version codes are configurable and monotonic by default. A manually supplied code must be unused and higher than earlier uploads.
 
 Local upload also works with a private service-account JSON file:
 

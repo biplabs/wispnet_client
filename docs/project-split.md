@@ -1,10 +1,10 @@
 # Client and server projects
 
-`wispnet` stays at its existing path and on main. It will be renamed to
-`wispnet_client` separately. `wispnet_server` is a sibling folder prepared for
-its own repository. No client package has a path dependency on that folder.
+The client repository and local folder are named `wispnet_client`.
+`wispnet_server` is its sibling folder and separate repository. Both projects
+work on main; no client package has a path dependency on the server folder.
 
-| Client (`wispnet`) | Infrastructure (`wispnet_server`) |
+| Client (`wispnet_client`) | Infrastructure (`wispnet_server`) |
 | --- | --- |
 | Flutter desktop and Android | Standalone packet relay |
 | Node daemon, CLI and TUI | Public HTTP ingress/gateway |
@@ -36,8 +36,7 @@ server also provides an opt-in test of real binaries from both projects:
 cargo build -p wispnet-cli --locked
 cd ../wispnet_server
 cargo build --workspace --locked
-python3 scripts/test_client_interop.py --client-root ../wispnet
-# After the future rename, pass --client-root ../wispnet_client instead.
+python3 scripts/test_client_interop.py --client-root ../wispnet_client
 ```
 
 The cross-project test uses only private temporary identities and loopback ports.
