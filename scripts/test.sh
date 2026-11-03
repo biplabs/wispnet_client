@@ -13,7 +13,6 @@ fi
 if [ "$(uname -s)" = Darwin ]; then
     export TMPDIR=/tmp
 fi
-node --test experiments/relay-compatibility/test/*.test.js
 cargo fmt --all --check
 # The patched Iroh runtime is excluded from workspace formatting.
 rustfmt --edition 2024 --check vendor/iroh/src/runtime.rs
@@ -29,8 +28,6 @@ python3 -m unittest discover -s scripts -p test_uninstall.py
 python3 -m unittest discover -s scripts -p test_arch_package.py
 python3 -m unittest discover -s scripts -p test_macos_distribution.py
 python3 -m unittest discover -s scripts -p test_relay_network_audit.py
-python3 -m unittest discover -s scripts -p test_relay_discovery.py
-python3 scripts/standalone_relay_smoke.py
 python3 scripts/smoke.py
 python3 scripts/registry_smoke.py
 python3 scripts/host_smoke.py

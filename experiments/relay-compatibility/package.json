@@ -1,1 +1,0 @@
-{"name":"wispnet-sites-relay-spike","private":true,"type":"module","scripts":{"bundle":"esbuild src/relay.js --bundle --format=esm --platform=browser --outfile=worker/index.js","test":"node --test test/*.test.js"},"dependencies":{"@noble/hashes":"1.8.0"},"devDependencies":{"esbuild":"0.25.11"}}

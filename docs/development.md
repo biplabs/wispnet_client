@@ -18,7 +18,7 @@ production browser gateway remain unimplemented. See the
 | wispnet-agent | Agent lifecycle, identity and Iroh tunnel; future browser gateway |
 | wispnet-registry | Registry lifecycle and future authenticated API/persistence |
 | wispnet-cli | Linux CLI, structured logging, and OS signals |
-| wispnet-relay | Standalone packet relay, separate TLS configuration and lifecycle; no node authority |
+| wispnet-relay / wispnet-public-gateway | Standalone infrastructure in the sibling `wispnet_server` project |
 
 ## Build and verify
 
@@ -32,9 +32,9 @@ git push
 ```
 
 The hook runs formatting, Clippy, unit tests, a debug build, CLI lifecycle/tunnel
-smoke tests, and the disposable browser-boundary suite. Install OpenSSL for the standalone relay TLS smoke test, and uv and Python 3.11+ for that suite. Node 22+ runs the bundled Sites relay
-spike authentication checks without installing npm dependencies. The optional
-[live Sites compatibility test](sites-relay-validation.md) reports hosting failures
+smoke tests, and the disposable browser-boundary suite. Install OpenSSL, uv and Python 3.11+ for that suite. Standalone relay TLS and Sites relay
+checks run separately in `wispnet_server/scripts/test.sh`. The optional
+[live Sites compatibility test](../../wispnet_server/docs/sites-relay-validation.md) reports hosting failures
 separately from the local suite.
 It blocks a push on failure, a dirty working tree, or a branch other than main,
 so checks cover the commit being pushed. Fresh clones must install the hook;

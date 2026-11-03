@@ -5814,21 +5814,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wispnet-public-gateway"
-version = "0.1.0"
-dependencies = [
- "libc",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "toml",
- "wispnet-agent",
- "wispnet-client",
- "wispnet-core",
-]
-
-[[package]]
 name = "wispnet-registry"
 version = "0.1.0"
 dependencies = [
@@ -5846,22 +5831,6 @@ dependencies = [
  "tower",
  "tracing",
  "wispnet-core",
- "zeroize",
-]
-
-[[package]]
-name = "wispnet-relay"
-version = "0.1.0"
-dependencies = [
- "iroh-base",
- "iroh-relay",
- "libc",
- "rustls",
- "rustls-pki-types",
- "serde",
- "tempfile",
- "tokio",
- "toml",
  "zeroize",
 ]
 

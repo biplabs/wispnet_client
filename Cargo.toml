@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/files", "crates/shell", "crates/ssh-adapter", "crates/core", "crates/agent", "crates/registry", "apps/node/cli", "apps/relay", "apps/public-gateway", "apps/flutter/android/native", "crates/client", "apps/node/daemon"]
+members = ["crates/files", "crates/shell", "crates/ssh-adapter", "crates/core", "crates/agent", "crates/registry", "apps/node/cli", "apps/flutter/android/native", "crates/client", "apps/node/daemon"]
 resolver = "3"
 exclude = ["vendor/iroh", "vendor/noq-proto"]
 

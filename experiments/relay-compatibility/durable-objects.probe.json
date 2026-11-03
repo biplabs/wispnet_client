@@ -1,4 +1,0 @@
-{
-  "durable_objects": {"bindings": [{"name": "RELAY_ROOMS", "class_name": "RelayRoom"}]},
-  "migrations": [{"tag": "relay-room-v1", "new_sqlite_classes": ["RelayRoom"]}]
-}

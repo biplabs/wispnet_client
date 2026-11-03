@@ -17,8 +17,9 @@ use tokio::{
     task::{JoinHandle, JoinSet},
 };
 use wispnet_core::{host::ServiceKind, protocol};
-#[path = "public_ingress.rs"]
-pub mod ingress;
+#[cfg(test)]
+#[path = "test_support/public_ingress.rs"]
+mod ingress;
 pub const ALPN: &[u8] = b"wispnet/public/1";
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
@@ -111,7 +112,7 @@ fn load(state: &Path, owner: EndpointId) -> Result<Saved, String> {
             return Ok(Saved {
                 version: 1,
                 owner,
-                gateway: serde_json::from_str(include_str!("../../../deploy/public/gateway.json"))
+                gateway: serde_json::from_str(include_str!("../../../config/public/gateway.json"))
                     .map_err(|_| "Invalid default public gateway")?,
                 services: vec![],
             });

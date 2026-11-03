@@ -100,16 +100,18 @@ a newly published hostname may take a few seconds while the certificate is issue
 The local certificate-permission endpoint accepts only currently registered
 public names and is blocked by the public HTTP front end.
 
-Build and deploy from this checkout:
+Build and deploy from the sibling server checkout:
 
 ```sh
+cd ../wispnet_server
 cargo build -p wispnet-public-gateway -p wispnet-relay --locked
 python3 scripts/install_public_gateway.py --ssh-host desktop.home \
   --publisher FULL_OWNER_ID_1 --publisher FULL_OWNER_ID_2
 ```
 
 The installer preserves the public gateway identity, checks it against the public
-bootstrap in `deploy/public/gateway.json`, saves a rollback snapshot, installs the
+server bootstrap in `deploy/public/gateway.json` (the client copy is
+`config/public/gateway.json`), saves a rollback snapshot, installs the
 HTTPS/public services, and verifies the existing relay's HTTPS endpoint. It
 restores the previous installation if startup/health checks fail. It never
 publishes any backend. A gateway identity loss requires an explicit bootstrap

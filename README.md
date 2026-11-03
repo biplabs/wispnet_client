@@ -1,5 +1,11 @@
 # Wispnet
 
+This is the **client project** (desktop, Android, CLI and TUI). The folder and
+repository remain named `wispnet` for now; a later rename to `wispnet_client` is
+planned. Server infrastructure lives independently in the sibling
+[`wispnet_server`](../wispnet_server/README.md) project. Neither workspace needs
+the other to build or run its normal tests.
+
 **Your services. Any device. Wherever you are.**
 
 Project domain: **`wispnet.app`** · [v1 roadmap](https://github.com/biplabs/wispnet/issues/1) · [Implementation issues](https://github.com/biplabs/wispnet/issues)
@@ -17,13 +23,19 @@ Wispnet brings your self-hosted services into one directory and makes them acces
 - `apps/node/desktop`: stdlib Python owner/cache helpers and their tests (no GUI runtime).
 - `apps/flutter`: shared Android/desktop Flutter UI and native Linux/macOS runners.
 - `apps/flutter/desktop`: private Python bridge, desktop persistence and adapter tests.
-- `apps/relay`: separate disposable packet relay server.
 - `apps/flutter/android`: Android runner, native services, Gradle wrapper and Rust JNI adapter in `native/`.
 - `crates/core`, `crates/agent`, `crates/registry`, `crates/client`: shared protocol, peer transport, host-local authority and protected browser client/gateway.
 - `crates/shell`: WispShell-derived shell protocol, PTY sessions and reconnect history.
 - `crates/files`: built-in binary file transfers with durable resume and checksum verification.
-- `deploy/node`, `deploy/relay`, `config/node`: deployment and example configuration.
-- `experiments/`: browser and Sites compatibility investigations.
+- `deploy/node`, `config/node`: client/node deployment and example configuration.
+- `config/public/gateway.json`: public gateway bootstrap pin consumed by clients.
+- `experiments/browser`: browser-boundary investigations.
+
+Standalone relay/public gateway binaries, the public homepage, Caddy/systemd
+server deployment, relay configuration and the Sites relay experiment are in
+`../wispnet_server`. Host-local services, authority, Shell, Files and publication
+controls stay in the client because each device remains a peer and service host.
+See [the split guide](docs/project-split.md) for ownership and validation.
 
 [Linux desktop/tray setup](docs/linux-desktop.md) · [macOS app](docs/macos-desktop.md). Installed service names, state paths and Android package ID stay unchanged by the source reorganization.
 
@@ -162,7 +174,7 @@ The explicitly configured primary relay is **`relay.wispnet.app`**.
 
 The current relay infrastructure runs on `pi3.home`, with Caddy providing automatic
 public TLS certificates. The desktop node remains a separate role. See the
-[relay deployment and upgrade guide](docs/desktop-relay.md). Native tablet access
+[relay deployment and upgrade guide](../wispnet_server/docs/desktop-relay.md). Native tablet access
 through a cellular hotspot has been verified; see [external-network validation](docs/external-relay-validation.md).
 
 ```text

@@ -80,7 +80,7 @@ The relay now uses pinned Iroh's built-in Let's Encrypt TLS-ALPN-01 support. The
 existing external port 443 mapping suffices; no extra forwarding, DNS API token or
 VM was introduced. Public issuance and normal TLS verification were checked, and
 cached certificate/account files stay protected on desktop. See
-[desktop deployment](desktop-relay.md) for renewal and manual fallback details.
+[desktop deployment](../../wispnet_server/docs/desktop-relay.md) for renewal and manual fallback details.
 
 A private Sites Worker was considered as an external wire client. Once the
 physical hotspot became available, no new Site code/deployment was needed: the

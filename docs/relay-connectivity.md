@@ -18,7 +18,7 @@ max_streams_per_connection = 8
 ```
 
 The current relay runs on `pi3.home` behind Caddy, separately from the desktop
-node; see the [deployment and TLS instructions](desktop-relay.md). Use your operated relay. Normal mode permits direct UDP/NAT paths
+node; see the [deployment and TLS instructions](../../wispnet_server/docs/desktop-relay.md). Use your operated relay. Normal mode permits direct UDP/NAT paths
 and relay fallback. Choose a reachable bind address for direct connectivity.
 `relay_only = true` removes all peer UDP transports, useful for restrictive
 networks and testing. Relay TCP/TLS still needs network access. The config bind
@@ -170,6 +170,7 @@ every carrier/router combination.
 For the existing Caddy-fronted deployment:
 
 ```sh
+cd ../wispnet_server
 python3 scripts/install_relay_discovery.py --ssh-host desktop.home
 cargo run -p wispnet-agent --example relay_discovery_probe --locked
 ```
@@ -273,8 +274,8 @@ This setting therefore does not require every unused relay socket to close immed
 These are endpoint settings; change each node's configuration and restart its
 daemon (or app endpoint) to apply them. Existing identities and approvals remain valid.
 Relay operators configure the separate ingress rate limit in the relay's
-[`[client_rx]` settings](../config/relay/relay.toml); see
-[relay deployment](desktop-relay.md). That limit does not affect direct transfers.
+[`[client_rx]` settings](../../wispnet_server/config/relay/relay.toml); see
+[relay deployment](../../wispnet_server/docs/desktop-relay.md). That limit does not affect direct transfers.
 
 With primary preference enabled, Wispnet explicitly prefers `relay_url` as its home packet relay whenever its
 TLS-authenticated relay connection works. UDP discovery failure, a private

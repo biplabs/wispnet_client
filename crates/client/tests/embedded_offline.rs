@@ -14,8 +14,12 @@ use wispnet_agent::{
 };
 use wispnet_client::{
     Client,
-    public_access::{hostname, ingress::Ingress},
+    public_access::{ALPN, Registration, hostname, read_json, valid_domain, write_json},
 };
+#[allow(dead_code)]
+#[path = "../src/test_support/public_ingress.rs"]
+mod ingress;
+use ingress::Ingress;
 use wispnet_core::{
     config::{ServiceConfig, TransportConfig},
     identity::SecretKey,
