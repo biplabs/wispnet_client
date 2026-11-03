@@ -46,7 +46,7 @@ archive checksums, clean source provenance, platform, desktop and license metada
 Project tests remain local through the required pre-push hook.
 
 After all three builds succeed, the workflow updates the rolling
-[Development build prerelease](https://github.com/biplabs/wispnet_client/releases/tag/development)
+[Latest development build](https://github.com/biplabs/wispnet_client/releases/latest)
 with the archives and their `.sha256` sidecars. Download
 `wispnet-linux-x86_64.tar.gz` and its checksum directly from that release, then
 follow the verification and installation steps above. The release notes identify

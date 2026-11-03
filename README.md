@@ -39,9 +39,9 @@ See [the split guide](docs/project-split.md) for ownership and validation.
 
 [Linux desktop/tray setup](docs/linux-desktop.md) · [macOS app](docs/macos-desktop.md). Installed service names, state paths and Android package ID stay unchanged by the source reorganization.
 
-Download the [development release](https://github.com/biplabs/wispnet_client/releases/tag/development)
+Download the [development release](https://github.com/biplabs/wispnet_client/releases/latest)
 for Linux x86_64 or macOS (Apple Silicon and Intel), including the node/CLI,
-Flutter desktop and installer. GitHub Actions refreshes this prerelease after
+Flutter desktop and installer. GitHub Actions publishes a new development release after
 successful builds of `main`; see the [Linux bundle guide](docs/linux-distribution.md)
 or [macOS guide](docs/macos-desktop.md) for requirements and installation.
 

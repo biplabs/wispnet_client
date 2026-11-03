@@ -113,7 +113,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   release:
-    name: Publish development prerelease
+    name: Publish development release
     needs: build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -138,7 +138,7 @@ jobs:
           for platform in linux-x86_64 macos-aarch64 macos-x86_64; do
             sha256sum --check "wispnet-$platform.tar.gz.sha256"
           done
-      - name: Publish rolling development release
+      - name: Publish development release
         run: |
           # An older build must not replace a newer main build's release.
           if [ "$(gh api "repos/$GH_REPO/git/ref/heads/main" --jq .object.sha)" != "$SOURCE_COMMIT" ]; then
@@ -158,17 +158,17 @@ jobs:
 
           Python 3.11+ is required for installation and desktop helpers. The macOS app is ad hoc signed and is not notarized.
 
-          This rolling prerelease is replaced after successful builds of main. It is a development snapshot, not a stable v1 release. Project tests run locally before pushing.
+          A new development release is published after successful builds of main. It is a development snapshot, not a stable v1 release. Project tests run locally before pushing.
           EOF
-          if gh release view development > /dev/null 2>&1; then
-            gh release upload development dist/*.tar.gz dist/*.sha256 --clobber
-            gh api --method PATCH "repos/$GH_REPO/git/refs/tags/development" \
-              -f "sha=$SOURCE_COMMIT" -F force=true > /dev/null
-            gh release edit development --title 'Development build' --prerelease --latest=false \
+          release_tag="development-${{ github.run_number }}-${SOURCE_COMMIT:0:7}"
+          release_title="Development build $(date -u +%Y-%m-%d) (${SOURCE_COMMIT:0:7})"
+          if gh release view "$release_tag" > /dev/null 2>&1; then
+            gh release upload "$release_tag" dist/*.tar.gz dist/*.sha256 --clobber
+            gh release edit "$release_tag" --title "$release_title" --prerelease=false --latest \
               --notes-file "$RUNNER_TEMP/release-notes.md"
           else
-            gh release create development dist/*.tar.gz dist/*.sha256 --target "$SOURCE_COMMIT" \
-              --title 'Development build' --prerelease --latest=false \
+            gh release create "$release_tag" dist/*.tar.gz dist/*.sha256 --target "$SOURCE_COMMIT" \
+              --title "$release_title" --latest \
               --notes-file "$RUNNER_TEMP/release-notes.md"
           fi
-          echo "[Download Linux and macOS development builds](https://github.com/$GH_REPO/releases/tag/development)" >> "$GITHUB_STEP_SUMMARY"
+          echo "[Download Linux and macOS development builds](https://github.com/$GH_REPO/releases/latest)" >> "$GITHUB_STEP_SUMMARY"
