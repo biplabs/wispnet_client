@@ -11,7 +11,9 @@ if [ -n "${WISPNET_SSH_RELAY_HOST:-}" ] && [ "${WISPNET_ANDROID_RELAY_TEST:-0}" 
 fi
 # Darwin's per-user temporary path can exceed the Unix-domain socket limit.
 if [ "$(uname -s)" = Darwin ]; then
-    export TMPDIR=/tmp
+    # Share roots reject symlink components; /tmp is a symlink on macOS.
+    TMPDIR=$(cd /tmp && pwd -P)
+    export TMPDIR
 fi
 cargo fmt --all --check
 # The patched Iroh runtime is excluded from workspace formatting.
