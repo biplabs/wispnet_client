@@ -1124,7 +1124,7 @@ mod tests {
                 wispnet_registry::host::Mutation::FileShare {
                     expected_revision: snapshot.revision,
                     id: "source".into(),
-                    root: marker.path().to_owned(),
+                    root: marker.path().canonicalize().unwrap(),
                     allow: vec![],
                 },
             )
