@@ -17,11 +17,15 @@ class MachineCard extends StatelessWidget {
     required this.onOpen,
     required this.onLinks,
     this.onSettings,
+    this.onSSHSetup,
+    this.onSSHStatus,
     this.onToggle,
     required this.onReorder,
     this.showHeader = true,
     this.onFilesDropped,
   });
+  final Future<String> Function()? onSSHSetup;
+  final Future<Map<String, dynamic>> Function()? onSSHStatus;
   final Machine machine;
   final bool showHeader;
   final Future<void> Function(Map<String, dynamic>, List<String>)?
@@ -245,6 +249,19 @@ class MachineCard extends StatelessWidget {
       onSettings: onSettings == null ? null : () => onSettings!(service),
       settingsTooltip: 'Settings for ${service['id']} on ${machine.name}',
       actions: [
+        if (service['kind'] == 'shell')
+          IconButton(
+            tooltip: 'Show connection commands for Shell',
+            onPressed: busy
+                ? null
+                : () => showShellCommands(
+                    context,
+                    machine,
+                    onSetup: onSSHSetup,
+                    onStatus: onSSHStatus,
+                  ),
+            icon: const Icon(Icons.link, size: 20, color: WispColors.cyan),
+          ),
         if (!local && isInboxService(service))
           IconButton(
             tooltip: 'Send files to ${service['id']}',
@@ -300,6 +317,118 @@ class MachineCard extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> showShellCommands(
+  BuildContext context,
+  Machine machine, {
+  Future<String> Function()? onSetup,
+  Future<Map<String, dynamic>> Function()? onStatus,
+}) {
+  final statusFuture = onStatus?.call();
+  var added = false;
+  final host = machine.id;
+  final native = 'wispnet shell $host';
+  final name = machine.name;
+  var ssh = 'ssh shell-$name.localhost';
+  var installing = false;
+  String? message;
+  return showDialog<void>(
+    context: context,
+    builder: (context) => StatefulBuilder(
+      builder: (context, update) => FutureBuilder<Map<String, dynamic>>(
+        future: statusFuture,
+        builder: (context, status) => AlertDialog(
+          title: Text('Connect to Shell on ${machine.name}'),
+          content: SizedBox(
+            width: 560,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Run on a paired computer with Shell access.'),
+                  const SizedBox(height: 16),
+                  const Text('Wispnet'),
+                  WispCommandBlock(command: native, copyText: native),
+                  const SizedBox(height: 16),
+                  const Text('SSH'),
+                  WispCommandBlock(
+                    command: status.data?['command'] as String? ?? ssh,
+                    copyText: status.data?['command'] as String? ?? ssh,
+                  ),
+                  const SizedBox(height: 16),
+                  if (onStatus != null && status.hasError)
+                    const Text(
+                      'Could not check SSH alias status. Reopen this popup to retry.',
+                    ),
+                  if (onStatus != null &&
+                      status.hasData &&
+                      status.data?['installed'] != true)
+                    const Text(
+                      'Update Wispnet on this computer to enable SSH connections.',
+                    ),
+                  if (onSetup != null &&
+                      !added &&
+                      status.data?['alias_configured'] != true) ...[
+                    const SizedBox(height: 8),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.add_link),
+                      label: Text(installing ? 'Adding…' : 'Add SSH alias'),
+                      onPressed:
+                          (installing ||
+                              added ||
+                              status.data?['alias_configured'] == true ||
+                              (onStatus != null &&
+                                  (!status.hasData ||
+                                      status.data?['installed'] != true)))
+                          ? null
+                          : () async {
+                              update(() {
+                                installing = true;
+                                message = null;
+                              });
+                              try {
+                                final command = await onSetup();
+                                if (context.mounted) {
+                                  update(() {
+                                    ssh = command;
+                                    added = true;
+                                    message = null;
+                                  });
+                                }
+                              } catch (error) {
+                                if (context.mounted) {
+                                  update(() {
+                                    message = 'Could not add SSH alias: $error';
+                                  });
+                                }
+                              } finally {
+                                if (context.mounted) {
+                                  update(() {
+                                    installing = false;
+                                  });
+                                }
+                              }
+                            },
+                    ),
+                    if (message != null) Text(message!),
+                    const SizedBox(height: 8),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
 class ReorderTile extends StatelessWidget {

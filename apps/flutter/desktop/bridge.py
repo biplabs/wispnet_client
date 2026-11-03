@@ -417,6 +417,45 @@ class Bridge:
                                 **({'recursive': True} if recursive else {}))
 
     def dispatch(self, method, args):
+        if method == 'sshStatus':
+            host = args.get('host', '')
+            if not isinstance(host, str) or not re.fullmatch(r'[0-9a-f]{64}', host):
+                raise ValueError('Invalid Shell host')
+            executable = Path.home() / '.local/libexec/wispnet-node/wispnet'
+            installed = False
+            if executable.is_file():
+                result = subprocess.run([str(executable), 'ssh-bridge', '--help'],
+                                        capture_output=True, text=True, timeout=5)
+                installed = result.returncode == 0 and '--stdio' in result.stdout
+            command = None
+            path = Path.home() / '.ssh/config'
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+                with os.fdopen(fd) as config:
+                    meta = os.fstat(config.fileno())
+                    if not stat.S_ISREG(meta.st_mode) or meta.st_uid != os.geteuid() or meta.st_mode & 0o022 or meta.st_size > 1024 * 1024:
+                        raise ValueError('Cannot verify SSH alias: unsafe or oversized configuration')
+                    text = config.read(1024 * 1024 + 1)
+                begin, end = f'# Wispnet bridge {host} begin\n', f'# Wispnet bridge {host} end\n'
+                if begin in text and end in text.split(begin, 1)[1]:
+                    block = text.split(begin, 1)[1].split(end, 1)[0]
+                    alias = re.search(r'^Host (shell-[a-z0-9._-]+\.localhost)$', block, re.MULTILINE)
+                    if alias and f'--host {host}' in block and 'ssh-bridge' in block:
+                        command = 'ssh ' + alias.group(1)
+            except FileNotFoundError:
+                pass
+            return {'installed': installed, 'alias_configured': command is not None, 'command': command}
+        if method == 'sshSetup':
+            host = args.get('host', '')
+            if not isinstance(host, str) or not re.fullmatch(r'[0-9a-f]{64}', host):
+                raise ValueError('Invalid Shell host')
+            executable = Path.home() / '.local/libexec/wispnet-node/wispnet'
+            result = subprocess.run([str(executable), 'ssh-bridge', '--host', host,
+                                     '--config', str(self.config.resolve()), '--install-config'],
+                                    capture_output=True, text=True, timeout=35)
+            if result.returncode:
+                raise ValueError(result.stderr.strip() or 'Could not add SSH bridge')
+            return {'command': result.stdout.strip()}
         if method == 'startDesktop':
             self.lifecycle(True)
             self.api.request(op='enable')

@@ -1,5 +1,6 @@
 //! Optional, owner-local SSH compatibility frontend for native Wispnet Shell.
 //! SSH ends at this process; the node authenticates and authorizes remote access.
+mod install;
 mod key;
 mod local;
 mod server;
@@ -7,12 +8,13 @@ mod server;
 use local::Local;
 use std::{ffi::OsString, path::PathBuf};
 
-pub const HELP: &str = "SSH adapter: wispnet ssh-bridge --host DEVICE_ID --stdio [--config PATH]\nSSH config:  wispnet ssh-bridge --host DEVICE_ID --print-config [--config PATH]\nThe adapter runs over stdio only. Shell access must already be granted on the target.\nInteractive shells and streaming commands are supported; SFTP and forwarding are not.";
+pub const HELP: &str = "SSH adapter: wispnet ssh-bridge --host DEVICE_ID --stdio [--config PATH]\nSSH config:  wispnet ssh-bridge --host DEVICE_ID --print-config [--config PATH]\nOne-time setup: wispnet ssh-bridge --host DEVICE_ID --install-config [--config PATH]\nThe adapter runs over stdio only. Shell access must already be granted on the target.\nInteractive shells and streaming commands are supported; SFTP and forwarding are not.";
 
 struct Options {
     host: String,
     config: PathBuf,
     print_config: bool,
+    install_config: bool,
 }
 
 /// Run one local SSH connection, or print its explicitly pinned OpenSSH stanza.
@@ -29,12 +31,18 @@ pub fn run_args(args: &[OsString]) -> Result<u32, String> {
         .map_err(|e| e.to_string())?;
     let outcome = runtime.block_on(async {
         let (host, name) = local.resolve(&options.host).await?;
-        if options.print_config {
+        if options.print_config || options.install_config {
             let executable = std::env::current_exe().map_err(|e| e.to_string())?;
-            print!(
-                "{}",
-                config_stanza(&host, &name, &executable, &local.config)?
-            );
+            let stanza = config_stanza(&host, &name, &executable, &local.config)?;
+            if options.install_config {
+                install::save(&host, &stanza)?;
+                println!(
+                    "ssh shell-{}.localhost",
+                    wispnet_core::config::readable_device_id(&name)
+                );
+            } else {
+                print!("{stanza}");
+            }
             return Ok(0);
         }
         let key = key::load(&local.state, &host)?;
@@ -51,11 +59,13 @@ fn options(args: &[OsString]) -> Result<Options, String> {
     let mut config = None;
     let mut stdio = false;
     let mut print_config = false;
+    let mut install_config = false;
     let mut args = args.iter();
     while let Some(arg) = args.next() {
         match arg.to_str().ok_or(HELP)? {
             "--stdio" if !stdio => stdio = true,
             "--print-config" if !print_config => print_config = true,
+            "--install-config" if !install_config => install_config = true,
             "--host" if host.is_none() => {
                 host = Some(args.next().and_then(|s| s.to_str()).ok_or(HELP)?.to_owned())
             }
@@ -65,7 +75,12 @@ fn options(args: &[OsString]) -> Result<Options, String> {
             _ => return Err(HELP.into()),
         }
     }
-    if stdio == print_config {
+    if [stdio, print_config, install_config]
+        .into_iter()
+        .filter(|v| *v)
+        .count()
+        != 1
+    {
         return Err(HELP.into());
     }
     let host = host
@@ -80,6 +95,7 @@ fn options(args: &[OsString]) -> Result<Options, String> {
         host,
         config,
         print_config,
+        install_config,
     })
 }
 

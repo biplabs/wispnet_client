@@ -9,7 +9,17 @@ The adapter opens no TCP listener, and the remote host needs no SSH daemon.
 
 Pair the devices and grant the requesting device Shell access on the target.
 Both nodes must support streaming Shell execution for remote SSH commands.
-Print an OpenSSH configuration entry:
+On desktop, open Shell's link button and click **Add SSH alias** once on the
+computer you connect from. It saves the pinned alias in `~/.ssh/config` and
+shows the short SSH command. Existing unrelated SSH entries are preserved.
+The equivalent one-time command is:
+
+```sh
+wispnet ssh-bridge --host j-desktop --install-config
+```
+
+Repeated setup updates the same managed entry. To inspect an entry without
+saving it, print an OpenSSH configuration entry:
 
 ```sh
 wispnet ssh-bridge --host j-desktop --print-config
@@ -74,6 +84,18 @@ Separate persistent SSH host keys are stored under the local node's
 endpoint for a pinned peer and do not replace Iroh's verification of the remote
 peer. Host-key material is separate from the Wispnet identity. OpenSSH's normal
 known-host checking remains enabled.
+
+## Install and uninstall lifecycle
+
+The standard Wispnet installation includes the shared SSH bridge; no separate
+bridge installation is required for each host. Upgrades preserve existing aliases
+and SSH host keys. **Add SSH alias** creates only the selected host's shortcut.
+
+The Linux uninstaller removes Wispnet's marked alias blocks from `~/.ssh/config`
+before deleting its binaries. It preserves unrelated SSH configuration,
+`known_hosts`, Wispnet identity, permissions and private state (including adapter
+host keys). Unmarked entries added manually remain untouched. Incomplete markers
+or unsafe configuration files stop cleanup so configuration is not silently lost.
 
 ## Module boundary and removal
 

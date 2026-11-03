@@ -848,6 +848,17 @@ class _WispHomeState extends State<WispHome>
     onManage: () => machineSettings(machine),
     onOpen: (service) => open(machine, service),
     onLinks: (service) => serviceLinks(machine, service),
+    onSSHStatus: snapshot['desktop'] == true
+        ? () => backend.invoke('sshStatus', {'host': machine.id})
+        : null,
+    onSSHSetup: snapshot['desktop'] == true
+        ? () async {
+            final result = await backend.invoke('sshSetup', {
+              'host': machine.id,
+            });
+            return result['command'] as String;
+          }
+        : null,
     onSettings: local ? localServiceSettings : null,
     onToggle: local ? setServiceEnabled : null,
     onReorder: reorder,

@@ -18,6 +18,27 @@ def catalog():
 
 
 class BridgeTests(unittest.TestCase):
+    def test_ssh_status_distinguishes_shared_bridge_from_per_host_alias(self):
+        bridge = module.Bridge.__new__(module.Bridge)
+        with tempfile.TemporaryDirectory() as home, patch.dict(os.environ, HOME=home):
+            root = Path(home)
+            self.assertEqual(bridge.dispatch('sshStatus', {'host': PEER}),
+                             {'installed': False, 'alias_configured': False, 'command': None})
+            executable = root / '.local/libexec/wispnet-node/wispnet'
+            executable.parent.mkdir(parents=True)
+            executable.write_text('fixture')
+            (root / '.ssh').mkdir(mode=0o700)
+            (root / '.ssh/config').write_text(
+                f'# Wispnet bridge {PEER} begin\nHost shell-desktop.localhost\n'
+                f' ProxyCommand wispnet ssh-bridge --host {PEER} --stdio\n'
+                f'# Wispnet bridge {PEER} end\n')
+            with patch.object(module.subprocess, 'run', return_value=module.subprocess.CompletedProcess([], 0, '--stdio', '')):
+                result = bridge.dispatch('sshStatus', {'host': PEER})
+                self.assertTrue(result['installed'])
+                self.assertTrue(result['alias_configured'])
+                self.assertEqual(result['command'], 'ssh shell-desktop.localhost')
+                self.assertFalse(bridge.dispatch('sshStatus', {'host': OWN})['alias_configured'])
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

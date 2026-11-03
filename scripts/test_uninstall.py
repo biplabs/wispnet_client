@@ -53,6 +53,42 @@ class FirewallUninstall(unittest.TestCase):
 
 
 class UserUninstall(unittest.TestCase):
+    def test_ssh_cleanup_preserves_unrelated_entries_and_is_repeatable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            directory = home / '.ssh'
+            directory.mkdir(mode=0o700)
+            path = directory / 'config'
+            unrelated = 'Host personal\n HostName personal.example\n'
+            block = ('# Wispnet bridge ' + 'a' * 64 + ' begin\n'
+                     'Host shell-desktop.localhost\n ProxyCommand wispnet ssh-bridge --stdio\n'
+                     'Host *\n# Wispnet bridge ' + 'a' * 64 + ' end\n')
+            path.write_text(block + unrelated)
+            known = directory / 'known_hosts'
+            known.write_text('preserve trusted hosts')
+            node.remove_ssh_aliases(home)
+            node.remove_ssh_aliases(home)
+            self.assertEqual(path.read_text(), unrelated)
+            self.assertEqual(known.read_text(), 'preserve trusted hosts')
+
+    def test_ssh_cleanup_refuses_incomplete_blocks_and_symlinks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            home = Path(temporary)
+            (home / '.ssh').mkdir(mode=0o700)
+            path = home / '.ssh/config'
+            text = '# Wispnet bridge ' + 'a' * 64 + ' begin\nHost personal\n'
+            path.write_text(text)
+            with self.assertRaises(ValueError):
+                node.remove_ssh_aliases(home)
+            self.assertEqual(path.read_text(), text)
+            path.unlink()
+            target = home / 'other'
+            target.write_text('preserve')
+            path.symlink_to(target)
+            with self.assertRaises(OSError):
+                node.remove_ssh_aliases(home)
+            self.assertEqual(target.read_text(), 'preserve')
+
     def test_removes_programs_preserves_identity_and_unrelated_files(self):
         with tempfile.TemporaryDirectory() as temporary:
             home = Path(temporary)
