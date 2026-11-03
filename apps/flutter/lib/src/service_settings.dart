@@ -951,7 +951,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
                 : service['kind'] == 'shell'
                 ? 'Shell'
                 : service['kind'] == 'http'
-                ? 'Http'
+                ? 'HTTP'
                 : service['kind'].toString().toUpperCase(),
             color: WispColors.cyan,
           ),

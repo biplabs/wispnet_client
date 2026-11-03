@@ -746,7 +746,7 @@ class _WispHomeState extends State<WispHome>
           : service['kind'] == 'shell'
           ? 'Shell'
           : service['kind'] == 'http'
-          ? 'Http'
+          ? 'HTTP'
           : service['kind'].toString().toUpperCase(),
       child: ServiceSettings(
         android: snapshot['desktop'] != true,

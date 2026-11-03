@@ -232,7 +232,7 @@ class MachineCard extends StatelessWidget {
         : service['kind'] == 'shell'
         ? 'Shell'
         : service['kind'] == 'http'
-        ? 'Http'
+        ? 'HTTP'
         : (service['kind'] as String).toUpperCase();
     return WispServiceItem(
       title: service['id'] as String,
