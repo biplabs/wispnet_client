@@ -55,7 +55,7 @@ Future<void> tapHeader(WidgetTester tester, String tooltip) async {
 }
 
 Future<void> openInvitation(WidgetTester tester) async {
-  final button = find.widgetWithText(OutlinedButton, 'Pair this machine');
+  final button = find.widgetWithText(OutlinedButton, 'Pair this device');
   await tester.ensureVisible(button);
   await tester.tap(button);
   await tester.pumpAndSettle();
@@ -116,7 +116,7 @@ void main() {
         ]);
         await tapHeader(tester, 'Back');
         expect(find.text('Settings'), findsOneWidget);
-        expect(find.widgetWithText(TextField, 'Device ID'), findsOneWidget);
+        expect(find.widgetWithText(TextField, 'Device name'), findsOneWidget);
         expect(find.widgetWithText(TextField, 'Wispnet port'), findsOneWidget);
         expect(find.byType(ServiceSettings), findsNothing);
 
@@ -126,7 +126,7 @@ void main() {
         await tester.pumpAndSettle();
         await tapHeader(tester, 'Close');
         expect(find.byType(ServiceSettings), findsNothing);
-        expect(find.widgetWithText(TextField, 'Device ID'), findsNothing);
+        expect(find.widgetWithText(TextField, 'Device name'), findsNothing);
         expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
         await tester.tap(find.byTooltip('Settings'));
         await tester.pumpAndSettle();
@@ -159,7 +159,7 @@ void main() {
         await tapHeader(tester, 'Close');
         expect(find.byKey(const ValueKey('pairing-qr')), findsNothing);
         expect(find.byType(ServiceSettings), findsNothing);
-        expect(find.widgetWithText(TextField, 'Device ID'), findsNothing);
+        expect(find.widgetWithText(TextField, 'Device name'), findsNothing);
         expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
         await fixture.close(tester);
@@ -177,21 +177,21 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Settings for j-strix'));
       await tester.pumpAndSettle();
-      expect(find.textContaining('Device ID\nj-strix'), findsOneWidget);
+      expect(find.textContaining('Device name\nj-strix'), findsOneWidget);
       await tapHeader(tester, 'Back');
-      expect(find.text('Paired machines').hitTestable(), findsOneWidget);
-      final pair = find.widgetWithText(FilledButton, '+ Pair another machine');
+      expect(find.text('Paired devices').hitTestable(), findsOneWidget);
+      final pair = find.widgetWithText(FilledButton, '+ Pair another device');
       await tester.ensureVisible(pair);
       await tester.tap(pair);
       await tester.pumpAndSettle();
-      expect(find.text('Pair a machine').hitTestable(), findsOneWidget);
+      expect(find.text('Pair a device').hitTestable(), findsOneWidget);
       await tapHeader(tester, 'Back');
-      expect(find.text('Paired machines').hitTestable(), findsOneWidget);
+      expect(find.text('Paired devices').hitTestable(), findsOneWidget);
       await tester.tap(find.byTooltip('Settings for j-strix'));
       await tester.pumpAndSettle();
       await tapHeader(tester, 'Close');
-      expect(find.text('Paired machines'), findsNothing);
-      expect(find.textContaining('Device ID\nj-strix'), findsNothing);
+      expect(find.text('Paired devices'), findsNothing);
+      expect(find.textContaining('Device name\nj-strix'), findsNothing);
       expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
       expect(tester.takeException(), isNull);
       await fixture.close(tester);
@@ -210,7 +210,7 @@ void main() {
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(OutlinedButton, 'Remove'));
         await tester.pumpAndSettle();
-        final confirm = find.widgetWithText(FilledButton, 'Remove machine');
+        final confirm = find.widgetWithText(FilledButton, 'Remove device');
         await tester.ensureVisible(confirm);
         await tester.tap(confirm);
         await tester.pumpAndSettle();
@@ -220,16 +220,16 @@ void main() {
             .toList();
         expect(removals, hasLength(1));
         expect(removals.single.$2, {'host': fixture.peer});
-        expect(find.text('Paired machines').hitTestable(), findsOneWidget);
+        expect(find.text('Paired devices').hitTestable(), findsOneWidget);
         expect(find.byTooltip('Settings for j-strix'), findsNothing);
         expect(find.text('j-strix · aaaaaaaa'), findsNothing);
-        expect(find.textContaining('Device ID\nj-strix'), findsNothing);
+        expect(find.textContaining('Device name\nj-strix'), findsNothing);
         expect(
-          find.widgetWithText(FilledButton, '+ Pair another machine'),
+          find.widgetWithText(FilledButton, '+ Pair another device'),
           findsOneWidget,
         );
         await tapHeader(tester, 'Close');
-        expect(find.text('Paired machines'), findsNothing);
+        expect(find.text('Paired devices'), findsNothing);
         expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
         expect(tester.takeException(), isNull);
         await fixture.close(tester);
@@ -266,7 +266,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(backend.ownerCalls, hasLength(1));
         expect(find.byType(ServiceSettings), findsNothing);
-        expect(find.widgetWithText(TextField, 'Device ID'), findsNothing);
+        expect(find.widgetWithText(TextField, 'Device name'), findsNothing);
         expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
         await tester.tap(find.byTooltip('Settings'));
         await tester.pumpAndSettle();
@@ -296,8 +296,8 @@ void main() {
           'Devices',
         );
         expect(find.text('Existing device'), findsOneWidget);
-        await tester.ensureVisible(find.text('Pair this machine'));
-        await tester.tap(find.text('Pair this machine'));
+        await tester.ensureVisible(find.text('Pair this device'));
+        await tester.tap(find.text('Pair this device'));
         await tester.pumpAndSettle();
         expect(find.byKey(const ValueKey('pairing-qr')), findsOneWidget);
         expect(

@@ -89,19 +89,19 @@ void main() {
           ).writeAsBytes(bytes!.buffer.asUint8List());
           image.dispose();
           await tester.tap(find.text('Manage'));
-          await waitFor(find.text('Paired machines'));
+          await waitFor(find.text('Paired devices'));
           await capture('flutter-device-machines');
           await tester.tap(find.byTooltip('Close'));
           await tester.pump(const Duration(milliseconds: 500));
         } else {
           await tester.tap(find.byTooltip('Establish your wisp network'));
-          await waitFor(find.text('Pair a machine'));
+          await waitFor(find.text('Pair a device'));
           await capture('flutter-device-pairing');
           await tester.tap(find.byTooltip('Close'));
           await tester.pump(const Duration(milliseconds: 500));
         }
         if ((before['hosts'] as Map).isNotEmpty) {
-          await tester.tap(find.byTooltip('Online'));
+          await tester.tap(find.byTooltip('Go offline'));
           await waitFor(find.byTooltip('Enter wisp space'));
           await capture('flutter-device-standby');
           expect((await backend.invoke('snapshot'))['enabled'], false);

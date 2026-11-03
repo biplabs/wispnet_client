@@ -580,11 +580,11 @@ class SharedDownloadTile extends StatelessWidget {
     final speed = job.bytesPerSecond;
     final remaining = job.estimatedRemaining;
     final label = job.cancelling
-        ? 'Pausing download…'
+        ? 'Cancelling download…'
         : switch (state) {
             'starting' => 'Starting download…',
             'failed' => 'Download failed',
-            'cancelled' => 'Download paused',
+            'cancelled' => 'Download cancelled',
             _ => switch (job.status['phase']) {
               'queued' => 'Download queued',
               'preparing' =>

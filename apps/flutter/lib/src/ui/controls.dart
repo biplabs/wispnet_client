@@ -63,8 +63,10 @@ class WispCommandBlock extends StatelessWidget {
     super.key,
     required this.command,
     required this.copyText,
+    this.copyTooltip = 'Copy command',
+    this.copyMessage = 'Command copied',
   });
-  final String command, copyText;
+  final String command, copyText, copyTooltip, copyMessage;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -90,8 +92,8 @@ class WispCommandBlock extends StatelessWidget {
               ),
               WispCopyButton(
                 text: copyText,
-                tooltip: 'Copy send command',
-                message: 'Command prefix copied',
+                tooltip: copyTooltip,
+                message: copyMessage,
               ),
             ],
           ),

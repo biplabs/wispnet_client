@@ -7,10 +7,20 @@ import 'theme.dart';
 
 IconData wispServiceIcon(String kind) => switch (kind) {
   'shell' => Icons.terminal,
-  'files' => Icons.folder_outlined,
-  'file_inbox' => Icons.folder_outlined,
-  'file_share' => Icons.folder_shared_outlined,
-  _ => Icons.north_east,
+  'files' || 'file_inbox' => Icons.move_to_inbox_outlined,
+  'file_share' => Icons.folder_outlined,
+  'http' => Icons.language,
+  'tcp' => Icons.lan_outlined,
+  _ => Icons.dns_outlined,
+};
+
+String wispServiceTypeLabel(String kind) => switch (kind) {
+  'shell' => 'Shell',
+  'files' || 'file_inbox' => 'File inbox',
+  'file_share' => 'Shared folder',
+  'http' => 'HTTP',
+  'tcp' => 'TCP',
+  _ => kind.toUpperCase(),
 };
 
 /// The same service identity and control order in overview cards and settings.

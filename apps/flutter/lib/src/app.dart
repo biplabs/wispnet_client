@@ -399,7 +399,7 @@ class _WispHomeState extends State<WispHome>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const Text(
-            'Send files using the Wispnet command line on a paired computer. The receiving device must grant you Files access. Transfers resume after disconnects.',
+            'Open this inbox from the Wispnet app on a paired device to send files, or run this command on a paired computer. Transfers resume after disconnects.',
           ),
           const SizedBox(height: 12),
           const Text(
@@ -495,7 +495,7 @@ class _WispHomeState extends State<WispHome>
   Future<void> confirmCloseShell(Map<String, dynamic> shell) async {
     if (busy) return;
     final host = shell['host'] as String? ?? '';
-    final hostName = shell['host_name'] as String? ?? 'this machine';
+    final hostName = shell['host_name'] as String? ?? 'this device';
     final confirmed = await showWispSheet<bool>(
       context,
       title: 'Close terminal?',
@@ -555,7 +555,7 @@ class _WispHomeState extends State<WispHome>
     pairingSheet = true;
     await showWispSheet<void>(
       from ?? context,
-      title: 'Pair a machine',
+      title: 'Pair a device',
       child: Builder(
         builder: (pageContext) => PairingForm(
           backend: backend,
@@ -581,7 +581,7 @@ class _WispHomeState extends State<WispHome>
     }
     await showWispSheet<void>(
       context,
-      title: 'Paired machines',
+      title: 'Paired devices',
       child: StatefulBuilder(
         builder: (pageContext, update) {
           Future<void> openPage(Future<void> page) async {
@@ -607,7 +607,7 @@ class _WispHomeState extends State<WispHome>
                 pendingRequests = next['pendingRequests'] as int? ?? 0;
               });
             } catch (error) {
-              notice('Cannot refresh paired machines: ${message(error)}');
+              notice('Cannot refresh paired devices: ${message(error)}');
             }
           }
 
@@ -659,11 +659,11 @@ class _WispHomeState extends State<WispHome>
                 onPressed: () {
                   openPage(pair(from: pageContext));
                 },
-                child: const Text('+ Pair another machine'),
+                child: const Text('+ Pair another device'),
               ),
               const SizedBox(height: 16),
               SelectableText(
-                'Host ID\n${snapshot['peer'] ?? ''}',
+                'Device ID\n${snapshot['peer'] ?? ''}',
                 style: const TextStyle(fontSize: 12, color: WispColors.muted),
               ),
             ],
@@ -736,18 +736,30 @@ class _WispHomeState extends State<WispHome>
     }
   }
 
+  Future<void> shareService() async {
+    await showWispSheet<void>(
+      context,
+      title: 'Share a service',
+      child: ServiceSettings(
+        android: snapshot['desktop'] != true,
+        host: snapshot['peer'] as String? ?? '',
+        backend: backend,
+        servicesOnly: true,
+        createOnly: true,
+        onChanged: () {
+          unawaited(poll());
+          unawaited(refresh());
+        },
+      ),
+    );
+    await poll();
+    await refresh();
+  }
+
   Future<void> localServiceSettings(Map<String, dynamic> service) async {
     await showWispSheet<void>(
       context,
-      title: isInboxService(service)
-          ? 'Receive files'
-          : service['kind'] == 'file_share'
-          ? 'Share files'
-          : service['kind'] == 'shell'
-          ? 'Shell'
-          : service['kind'] == 'http'
-          ? 'HTTP'
-          : service['kind'].toString().toUpperCase(),
+      title: wispServiceTypeLabel(service['kind'] as String),
       child: ServiceSettings(
         android: snapshot['desktop'] != true,
         host: snapshot['peer'] as String? ?? '',
@@ -983,11 +995,11 @@ class _WispHomeState extends State<WispHome>
             WispListItem(
               key: ValueKey('choose-inbox-${service['id']}'),
               leading: const Icon(
-                Icons.folder_outlined,
+                Icons.move_to_inbox_outlined,
                 color: WispColors.cyan,
               ),
               title: Text(service['id'] as String),
-              subtitle: const Text('Inbox'),
+              subtitle: const Text('File inbox'),
               onTap: () => Navigator.pop(context, service),
             ),
         ],
@@ -1180,7 +1192,14 @@ class _WispHomeState extends State<WispHome>
                 key: const ValueKey('local-sector'),
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  sectionHeading('LOCAL SERVICES', const []),
+                  sectionHeading('LOCAL SERVICES', [
+                    OutlinedButton(
+                      key: const ValueKey('local-share-button'),
+                      onPressed: busy ? null : shareService,
+                      style: buttonStyle,
+                      child: const Text('+ Share'),
+                    ),
+                  ]),
                   const SizedBox(height: 12),
                   for (final machine in local)
                     directoryCard(machine, local: true),
@@ -1217,7 +1236,7 @@ class _WispHomeState extends State<WispHome>
                 ),
               ),
               const SizedBox(height: 12),
-              if (remote.isEmpty) const Text('Pair a machine to get started'),
+              if (remote.isEmpty) const Text('Pair a device to get started'),
               for (final machine in remote)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 14),

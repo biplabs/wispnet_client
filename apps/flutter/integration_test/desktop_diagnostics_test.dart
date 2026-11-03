@@ -60,9 +60,9 @@ void main() {
         );
         await waitFor(find.byTooltip('Settings'));
         await tester.tap(find.byTooltip('Settings'));
-        await waitFor(find.text('Diagnostic'));
-        await tester.ensureVisible(find.text('Diagnostic'));
-        await tester.tap(find.text('Diagnostic'));
+        await waitFor(find.text('Connection diagnostics'));
+        await tester.ensureVisible(find.text('Connection diagnostics'));
+        await tester.tap(find.text('Connection diagnostics'));
         await waitFor(find.byType(ConnectionDiagnostics));
         await waitFor(find.text('Run again'), seconds: 80);
         expect(backend.tested, [selected.key]);

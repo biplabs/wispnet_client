@@ -103,12 +103,12 @@ void main() {
         await mouse.moveTo(Offset.zero);
         await mouse.removePointer();
         await tester.tap(machineName);
-        await waitFor(find.textContaining('Host ID\n'));
+        await waitFor(find.textContaining('Device ID\n'));
         expect(find.widgetWithText(TextField, 'Display name'), findsNothing);
         await capture('machine-settings');
         expect(find.widgetWithText(OutlinedButton, 'Refresh'), findsNothing);
         await tester.tap(find.widgetWithText(OutlinedButton, 'Remove'));
-        await waitFor(find.text('Remove machine?'));
+        await waitFor(find.text('Remove device?'));
         await capture('remove-machine-confirmation');
         await tester.tap(find.text('Cancel'));
         await tester.pump(const Duration(milliseconds: 500));
@@ -122,9 +122,9 @@ void main() {
               )
               .first,
         );
-        await waitFor(find.text('+ Pair another machine'));
-        await tester.tap(find.text('+ Pair another machine'));
-        await waitFor(find.text('Pair a machine'));
+        await waitFor(find.text('+ Pair another device'));
+        await tester.tap(find.text('+ Pair another device'));
+        await waitFor(find.text('Pair a device'));
         expect(find.text('Pairing Code'), findsOneWidget);
         expect(find.text('QR'), findsOneWidget);
         expect(find.text('Import QR image'), findsOneWidget);
@@ -139,7 +139,7 @@ void main() {
         await tester.ensureVisible(find.text('Local services'));
         await tester.tap(find.text('Local services'));
         await waitFor(find.byKey(const ValueKey('share-service')));
-        expect(find.text('Pair this machine'), findsNothing);
+        expect(find.text('Pair this device'), findsNothing);
         expect(find.text('Remove service'), findsNothing);
         expect(find.text('Enable public access'), findsNothing);
         await capture('local-services');
@@ -184,13 +184,13 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.ensureVisible(find.text('Device access and pairing'));
         await tester.tap(find.text('Device access and pairing'));
-        await waitFor(find.text('Pair this machine'));
+        await waitFor(find.text('Pair this device'));
         expect(
           find.text('Device access and pairing').hitTestable(),
           findsOneWidget,
         );
         expect(find.text('Device and browser settings'), findsNothing);
-        await tester.tap(find.text('Pair this machine'));
+        await tester.tap(find.text('Pair this device'));
         await waitFor(find.byKey(const ValueKey('pairing-qr')));
         expect(find.text('Copy pairing code'), findsNothing);
         await capture('pair-this-machine-qr');
@@ -208,7 +208,7 @@ void main() {
         await capture('pair-this-machine-code');
         await tester.tap(find.byTooltip('Back').last);
         await tester.pump(const Duration(milliseconds: 500));
-        expect(find.text('Pair this machine'), findsOneWidget);
+        expect(find.text('Pair this device'), findsOneWidget);
         await tester.tap(find.byTooltip('Back').last);
         await tester.pump(const Duration(milliseconds: 500));
         expect(find.widgetWithText(TextField, 'Wispnet port'), findsOneWidget);
@@ -381,7 +381,7 @@ void main() {
         }
 
         await closeSheet(0);
-        await tester.tap(find.byTooltip('Online'));
+        await tester.tap(find.byTooltip('Go offline'));
         await waitFor(find.byTooltip('Enter wisp space'));
         expect((await native.invoke('snapshot'))['enabled'], false);
         expect(find.text('hyperjump to wispnet'), findsOneWidget);

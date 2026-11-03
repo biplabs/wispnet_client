@@ -52,7 +52,7 @@ void main() {
     Future<void> ownerPage() async {
       await tester.ensureVisible(find.text('Device access and pairing'));
       await tester.tap(find.text('Device access and pairing'));
-      await waitFor(find.text('Pair this machine'));
+      await waitFor(find.text('Pair this device'));
       expect(
         find.text('Device access and pairing').hitTestable(),
         findsOneWidget,
@@ -78,7 +78,7 @@ void main() {
       await waitFor(
         find.widgetWithText(TextField, 'Wispnet port').hitTestable(),
       );
-      expect(find.text('Pair this machine'), findsNothing);
+      expect(find.text('Pair this device'), findsNothing);
       await ownerPage();
       await tester.tap(find.byTooltip('Close').last);
       await tester.pump(const Duration(milliseconds: 500));

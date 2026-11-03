@@ -114,7 +114,7 @@ void main() {
         );
       }
       expect(find.byKey(const ValueKey('local-service-files')), findsNothing);
-      expect(find.text('Pair this machine'), findsNothing);
+      expect(find.text('Pair this device'), findsNothing);
       expect(find.text('Shell access'), findsNothing);
       expect(find.byType(WispCreateButton), findsOneWidget);
       expect(find.text('Add folder'), findsNothing);
@@ -240,7 +240,7 @@ void main() {
               : 'local-services-uniform-phone',
         );
         expect(tester.takeException(), isNull);
-        expect(find.text('Pair this machine'), findsNothing);
+        expect(find.text('Pair this device'), findsNothing);
         await tester.pumpWidget(const SizedBox());
       }
     },

@@ -282,10 +282,10 @@ class _PairingFormState extends State<PairingForm> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Text('Pair with this machine'),
+                const Text('Pair with this device'),
                 const SizedBox(height: 8),
                 Text(
-                  preview!['host_name'] as String? ?? 'Host',
+                  preview!['host_name'] as String? ?? 'Device',
                   style: const TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
@@ -347,18 +347,18 @@ class _MachineSettingsState extends State<MachineSettings> {
   Future<void> confirmRemove() async {
     final confirmed = await showWispSheet<bool>(
       context,
-      title: 'Remove machine?',
+      title: 'Remove device?',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            'Remove ${widget.machine.name} and close its Wispnet access on this device? This device will forget the pairing and close its local service routes. The other machine will learn about removal on its next contact. You can pair again later.',
+            'Remove ${widget.machine.name} and close its Wispnet access on this device? This device will forget the pairing and close its local service routes. The other device will learn about removal on its next contact. You can pair again later.',
           ),
           const SizedBox(height: 16),
           FilledButton(
             style: dangerStyle,
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove machine'),
+            child: const Text('Remove device'),
           ),
           const SizedBox(height: 12),
           TextButton(
@@ -376,7 +376,7 @@ class _MachineSettingsState extends State<MachineSettings> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       SelectableText(
-        'Device ID\n${widget.machine.name}\n\nHost ID\n${widget.machine.id}',
+        'Device name\n${widget.machine.name}\n\nDevice ID\n${widget.machine.id}',
         style: const TextStyle(color: WispColors.muted),
       ),
       const SizedBox(height: 16),
@@ -654,7 +654,7 @@ class _ConnectionDiagnosticsState extends State<ConnectionDiagnostics> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Diagnostic')),
+    appBar: AppBar(title: const Text('Connection diagnostics')),
     body: SafeArea(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
@@ -977,7 +977,7 @@ class _SettingsFormState extends State<SettingsForm> {
       TextField(
         controller: name,
         enabled: !saving,
-        decoration: const InputDecoration(labelText: 'Device ID'),
+        decoration: const InputDecoration(labelText: 'Device name'),
       ),
       const SizedBox(height: 12),
       const Text(
@@ -1028,7 +1028,7 @@ class _SettingsFormState extends State<SettingsForm> {
         ),
       ],
       const SizedBox(height: 12),
-      OutlinedButton(
+      OutlinedButton.icon(
         onPressed: saving
             ? null
             : () {
@@ -1040,7 +1040,8 @@ class _SettingsFormState extends State<SettingsForm> {
                   ),
                 );
               },
-        child: const Text('Diagnostic'),
+        icon: const Icon(Icons.network_check),
+        label: const Text('Connection diagnostics'),
       ),
       if (address.isNotEmpty) ...[
         const SizedBox(height: 16),

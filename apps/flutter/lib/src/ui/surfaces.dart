@@ -44,7 +44,10 @@ class WispPermissionCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text('Permission', style: TextStyle(fontWeight: FontWeight.w600)),
+        const Text(
+          'Allowed devices',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
         const SizedBox(height: 8),
         if (children.isEmpty)
           const Padding(

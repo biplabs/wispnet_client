@@ -61,9 +61,9 @@ class MachineCard extends StatelessWidget {
     final badge = machine.online
         ? ['Online', if (tel.isNotEmpty) tel].join(' · ')
         : machine.state == 'approval_pending'
-        ? 'AWAITING APPROVAL'
+        ? 'Awaiting approval'
         : machine.state == 'host_denied'
-        ? 'ACCESS DENIED'
+        ? 'Access denied'
         : 'Offline';
     final content = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -225,15 +225,8 @@ class MachineCard extends StatelessWidget {
         .where((peer) => peer != machine.id)
         .toSet()
         .length;
-    final subtitle = service['kind'] == 'file_share'
-        ? 'Share files'
-        : isInboxService(service)
-        ? 'Receive files'
-        : service['kind'] == 'shell'
-        ? 'Shell'
-        : service['kind'] == 'http'
-        ? 'HTTP'
-        : (service['kind'] as String).toUpperCase();
+    final subtitle = wispServiceTypeLabel(service['kind'] as String);
+    final disabledIconColor = WispColors.muted.withValues(alpha: .45);
     return WispServiceItem(
       title: service['id'] as String,
       kind: service['kind'] as String,
@@ -252,6 +245,8 @@ class MachineCard extends StatelessWidget {
         if (service['kind'] == 'shell')
           IconButton(
             tooltip: 'Show connection commands for Shell',
+            color: WispColors.cyan,
+            disabledColor: disabledIconColor,
             onPressed: busy
                 ? null
                 : () => showShellCommands(
@@ -260,23 +255,31 @@ class MachineCard extends StatelessWidget {
                     onSetup: onSSHSetup,
                     onStatus: onSSHStatus,
                   ),
-            icon: const Icon(Icons.link, size: 20, color: WispColors.cyan),
+            icon: const Icon(Icons.code, size: 20),
           ),
         if (!local && isInboxService(service))
           IconButton(
             tooltip: 'Send files to ${service['id']}',
+            color: WispColors.cyan,
+            disabledColor: disabledIconColor,
             onPressed: busy || !allowed ? null : () => onOpen(service),
-            icon: const Icon(
-              Icons.upload_file,
-              size: 20,
-              color: WispColors.cyan,
-            ),
+            icon: const Icon(Icons.upload_file, size: 20),
+          ),
+        if (!local && service['kind'] == 'file_share')
+          IconButton(
+            tooltip: 'Browse files in ${service['id']}',
+            color: WispColors.cyan,
+            disabledColor: disabledIconColor,
+            onPressed: busy || !allowed ? null : () => onOpen(service),
+            icon: const Icon(Icons.folder_open_outlined, size: 20),
           ),
         if (service['kind'] == 'http')
           IconButton(
             tooltip: 'Show links for ${service['id']}',
+            color: WispColors.cyan,
+            disabledColor: disabledIconColor,
             onPressed: busy ? null : () => onLinks(service),
-            icon: const Icon(Icons.link, size: 20, color: WispColors.cyan),
+            icon: const Icon(Icons.link, size: 20),
           ),
       ],
       subtitle: Wrap(
@@ -289,7 +292,7 @@ class MachineCard extends StatelessWidget {
           if (publicEnabled)
             Tooltip(
               message: publicCached
-                  ? 'Last known public link; refresh this machine to verify its status'
+                  ? 'Last known public link; refresh this device to verify its status'
                   : publicOnline
                   ? 'Public access enabled and online'
                   : 'Public access enabled but offline',
@@ -333,97 +336,84 @@ Future<void> showShellCommands(
   var ssh = 'ssh shell-$name.localhost';
   var installing = false;
   String? message;
-  return showDialog<void>(
-    context: context,
-    builder: (context) => StatefulBuilder(
+  return showWispSheet<void>(
+    context,
+    title: 'Connect to Shell on ${machine.name}',
+    child: StatefulBuilder(
       builder: (context, update) => FutureBuilder<Map<String, dynamic>>(
         future: statusFuture,
-        builder: (context, status) => AlertDialog(
-          title: Text('Connect to Shell on ${machine.name}'),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Run on a paired computer with Shell access.'),
-                  const SizedBox(height: 16),
-                  const Text('Wispnet'),
-                  WispCommandBlock(command: native, copyText: native),
-                  const SizedBox(height: 16),
-                  const Text('SSH'),
-                  WispCommandBlock(
-                    command: status.data?['command'] as String? ?? ssh,
-                    copyText: status.data?['command'] as String? ?? ssh,
-                  ),
-                  const SizedBox(height: 16),
-                  if (onStatus != null && status.hasError)
-                    const Text(
-                      'Could not check SSH alias status. Reopen this popup to retry.',
-                    ),
-                  if (onStatus != null &&
-                      status.hasData &&
-                      status.data?['installed'] != true)
-                    const Text(
-                      'Update Wispnet on this computer to enable SSH connections.',
-                    ),
-                  if (onSetup != null &&
-                      !added &&
-                      status.data?['alias_configured'] != true) ...[
-                    const SizedBox(height: 8),
-                    FilledButton.icon(
-                      icon: const Icon(Icons.add_link),
-                      label: Text(installing ? 'Adding…' : 'Add SSH alias'),
-                      onPressed:
-                          (installing ||
-                              added ||
-                              status.data?['alias_configured'] == true ||
-                              (onStatus != null &&
-                                  (!status.hasData ||
-                                      status.data?['installed'] != true)))
-                          ? null
-                          : () async {
-                              update(() {
-                                installing = true;
-                                message = null;
-                              });
-                              try {
-                                final command = await onSetup();
-                                if (context.mounted) {
-                                  update(() {
-                                    ssh = command;
-                                    added = true;
-                                    message = null;
-                                  });
-                                }
-                              } catch (error) {
-                                if (context.mounted) {
-                                  update(() {
-                                    message = 'Could not add SSH alias: $error';
-                                  });
-                                }
-                              } finally {
-                                if (context.mounted) {
-                                  update(() {
-                                    installing = false;
-                                  });
-                                }
-                              }
-                            },
-                    ),
-                    if (message != null) Text(message!),
-                    const SizedBox(height: 8),
-                  ],
-                ],
+        builder: (context, status) => Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Run on a paired computer with Shell access.'),
+            const SizedBox(height: 16),
+            const Text('Wispnet'),
+            WispCommandBlock(command: native, copyText: native),
+            const SizedBox(height: 16),
+            const Text('SSH'),
+            WispCommandBlock(
+              command: status.data?['command'] as String? ?? ssh,
+              copyText: status.data?['command'] as String? ?? ssh,
+            ),
+            const SizedBox(height: 16),
+            if (onStatus != null && status.hasError)
+              const Text(
+                'Could not check SSH alias status. Reopen this popup to retry.',
               ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close'),
-            ),
+            if (onStatus != null &&
+                status.hasData &&
+                status.data?['installed'] != true)
+              const Text(
+                'Update Wispnet on this computer to enable SSH connections.',
+              ),
+            if (onSetup != null &&
+                !added &&
+                status.data?['alias_configured'] != true) ...[
+              const SizedBox(height: 8),
+              FilledButton.icon(
+                icon: const Icon(Icons.add_link),
+                label: Text(installing ? 'Adding…' : 'Add SSH alias'),
+                onPressed:
+                    (installing ||
+                        added ||
+                        status.data?['alias_configured'] == true ||
+                        (onStatus != null &&
+                            (!status.hasData ||
+                                status.data?['installed'] != true)))
+                    ? null
+                    : () async {
+                        update(() {
+                          installing = true;
+                          message = null;
+                        });
+                        try {
+                          final command = await onSetup();
+                          if (context.mounted) {
+                            update(() {
+                              ssh = command;
+                              added = true;
+                              message = null;
+                            });
+                          }
+                        } catch (error) {
+                          if (context.mounted) {
+                            update(() {
+                              message = 'Could not add SSH alias: $error';
+                            });
+                          }
+                        } finally {
+                          if (context.mounted) {
+                            update(() {
+                              installing = false;
+                            });
+                          }
+                        }
+                      },
+              ),
+              if (message != null) Text(message!),
+              const SizedBox(height: 8),
+            ],
           ],
         ),
       ),

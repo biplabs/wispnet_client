@@ -490,11 +490,11 @@ void main() {
             .kind,
         'files',
       );
-      await tester.ensureVisible(find.text('Remove service'));
-      await tester.tap(find.text('Remove service'));
+      await tester.ensureVisible(find.text('Disable service'));
+      await tester.tap(find.text('Disable service'));
       await tester.pumpAndSettle();
-      expect(find.text('Remove service?'), findsOneWidget);
-      final confirm = find.widgetWithText(FilledButton, 'Remove service');
+      expect(find.text('Disable service?'), findsOneWidget);
+      final confirm = find.widgetWithText(FilledButton, 'Disable service');
       await tester.ensureVisible(confirm);
       await tester.tap(confirm);
       await tester.pumpAndSettle();
@@ -665,7 +665,7 @@ void main() {
       );
       expect(find.widgetWithText(Tab, 'Receive files'), findsNothing);
       expect(find.text('Add read-only file share'), findsNothing);
-      expect(find.text('Receive files'), findsNWidgets(2));
+      expect(find.text('File inbox'), findsNWidgets(2));
       await tester.tap(find.byKey(const ValueKey('share-service')));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(Tab, 'Receive files'), findsOneWidget);
@@ -780,7 +780,7 @@ void main() {
       await tester.tap(find.byTooltip('Folders and access for predictions'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('folder-mode')), findsNothing);
-      expect(find.text('Permission'), findsOneWidget);
+      expect(find.text('Allowed devices'), findsOneWidget);
       await tester.ensureVisible(find.text('Other device'));
       await tester.tap(find.text('Other device'));
       await tester.ensureVisible(find.text('My laptop'));
@@ -848,7 +848,7 @@ void main() {
   ) async {
     final backend = FolderBackend()..remote = true;
     await app(tester, backend);
-    expect(find.text('Receive files'), findsNWidgets(2));
+    expect(find.text('File inbox'), findsNWidgets(2));
     await tester.tap(find.text('predictions'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Choose files'));

@@ -18,12 +18,13 @@ class ServiceSettings extends StatefulWidget {
     required this.onChanged,
     this.initialSection = 'Devices',
     this.servicesOnly = false,
+    this.createOnly = false,
     this.serviceId,
     this.android = false,
     this.host = '',
   });
   final String initialSection;
-  final bool servicesOnly, android;
+  final bool servicesOnly, createOnly, android;
   final String host;
   final String? serviceId;
   final WispnetBackend backend;
@@ -502,127 +503,9 @@ class _ServiceSettingsState extends State<ServiceSettings> {
     );
   }
 
-  Future<void> editService([Map<String, dynamic>? service]) async {
+  Widget serviceCreationForm() {
     final current = status!;
-    final originalId = service?['id'] as String?;
-    late final id = TextEditingController(text: originalId);
-    final endpoint = Uri.parse(
-      'tcp://${service?['backend'] ?? '127.0.0.1:8080'}',
-    );
-    late final portField = TextEditingController(
-      text: endpoint.port.toString(),
-    );
-    var kind = service?['kind'] as String? ?? 'http';
-    var renamed = false;
-    final allowed = (service?['allow'] as List? ?? []).cast<String>().toSet();
     final devices = List<Map<String, dynamic>>.of(clients);
-    late final customForm = _ActionForm(
-      controllers: [id, portField],
-      builder: (context, submit, working, failure) => StatefulBuilder(
-        builder: (context, update) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextField(
-              controller: portField,
-              enabled: !working,
-              keyboardType: TextInputType.number,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              decoration: const InputDecoration(labelText: 'Port'),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              initialValue: kind,
-              decoration: const InputDecoration(
-                labelText: 'Protocol',
-                helperText: 'HTTP: websites and APIs with browser links. TCP: raw connections for native apps. UDP services are not supported yet.',
-                helperMaxLines: 5,
-              ),
-              items: ['http', 'tcp']
-                  .map(
-                    (k) => DropdownMenuItem(
-                      value: k,
-                      child: Text(k.toUpperCase()),
-                    ),
-                  )
-                  .toList(),
-              onChanged: working ? null : (v) => update(() => kind = v!),
-            ),
-            const SizedBox(height: 12),
-            WispServiceIdField(controller: id, enabled: !working),
-            const SizedBox(height: 12),
-            WispPermissionCard(
-              children: [
-                for (final c in devices)
-                  WispToggleListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(c['name'] as String),
-                    subtitle: Text(c['peer'] as String),
-                    value: allowed.contains(c['peer']),
-                    onChanged: working
-                        ? null
-                        : (v) => update(() {
-                            if (v!) {
-                              allowed.add(c['peer'] as String);
-                            } else {
-                              allowed.remove(c['peer']);
-                            }
-                          }),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            if (failure != null)
-              Text(failure, style: const TextStyle(color: WispColors.error)),
-            FilledButton(
-              onPressed: working
-                  ? null
-                  : () => submit(() async {
-                      final serviceId = id.text.trim();
-                      if (serviceId == 'shell' || serviceId == 'files') {
-                        throw const FormatException(
-                          '“shell” and “files” are reserved for built-in services. Use their access settings to manage permissions.',
-                        );
-                      }
-                      if (!RegExp(r'^[a-z0-9][a-z0-9._-]{0,63}$')
-                          .hasMatch(serviceId)) {
-                        throw const FormatException(
-                          'Enter a valid service ID.',
-                        );
-                      }
-                      if ((current['host']['services'] as List).any(
-                        (s) => s['id'] == serviceId && s['id'] != originalId,
-                      )) {
-                        throw const FormatException(
-                          'This ID exists. Edit that service instead.',
-                        );
-                      }
-                      final port = int.tryParse(portField.text.trim());
-                      if (port == null || port < 1 || port > 65535) {
-                        throw const FormatException(
-                          'Enter a port between 1 and 65535.',
-                        );
-                      }
-                      final host = endpoint.host
-                          .replaceAll('[', '')
-                          .replaceAll(']', '');
-                      final address =
-                          '${host.contains(':') ? '[$host]' : host}:$port';
-                      await mutate({
-                        'op': service == null ? 'service' : 'edit_service',
-                        'id': originalId ?? serviceId,
-                        if (service != null) 'new_id': serviceId,
-                        'backend': address,
-                        'kind': kind,
-                        'allow': allowed.toList(),
-                      }, current['host']['revision'] as int);
-                      renamed = service != null && serviceId != originalId;
-                    }),
-              child: const Text('Save'),
-            ),
-          ],
-        ),
-      ),
-    );
     Widget folderForm(String mode) => FileShareEditor(
       key: ValueKey('create-folder-$mode'),
       backend: widget.backend,
@@ -642,17 +525,40 @@ class _ServiceSettingsState extends State<ServiceSettings> {
           'root': root,
           'allow': allow,
         }, current['host']['revision'] as int);
+        widget.onChanged();
       },
     );
+    return _ServiceCreationTabs(
+      labels: const ['Receive files', 'Share files', 'Custom'],
+      children: [
+        folderForm('inbox'),
+        folderForm('share'),
+        _CustomServiceForm(
+          current: current,
+          devices: devices,
+          mutate: mutate,
+          onSaved: (_) => widget.onChanged(),
+        ),
+      ],
+    );
+  }
+
+  Future<void> editService([Map<String, dynamic>? service]) async {
+    final current = status!;
+    final devices = List<Map<String, dynamic>>.of(clients);
+    var renamed = false;
     await showWispSheet<void>(
       context,
       title: service == null ? 'Share a service' : 'Edit service',
       child: service != null
-          ? customForm
-          : _ServiceCreationTabs(
-              labels: ['Receive files', 'Share files', 'Custom'],
-              children: [folderForm('inbox'), folderForm('share'), customForm],
-            ),
+          ? _CustomServiceForm(
+              service: service,
+              current: current,
+              devices: devices,
+              mutate: mutate,
+              onSaved: (didRename) => renamed = didRename,
+            )
+          : serviceCreationForm(),
     );
     widget.onChanged();
     if (renamed &&
@@ -746,7 +652,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
   Future<void> invite() async {
     await showWispSheet<void>(
       context,
-      title: 'Pair this machine',
+      title: 'Pair this device',
       child: _Invitation(backend: widget.backend),
     );
     await load();
@@ -778,13 +684,13 @@ class _ServiceSettingsState extends State<ServiceSettings> {
               TextField(
                 controller: peer,
                 enabled: plan == null && !working,
-                decoration: const InputDecoration(labelText: 'Host ID'),
+                decoration: const InputDecoration(labelText: 'Device ID'),
               ),
               if (op == 'approve')
                 TextField(
                   controller: name,
                   enabled: plan == null && !working,
-                  decoration: const InputDecoration(labelText: 'Device ID'),
+                  decoration: const InputDecoration(labelText: 'Device name'),
                 ),
               for (final target in targets)
                 WispToggleListTile(
@@ -828,7 +734,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
                                 content: Text(
-                                  'Enter a full host ID, a device ID for approval, and select hosts.',
+                                  'Enter a full device ID, a device name for approval, and select hosts.',
                                 ),
                               ),
                             );
@@ -944,15 +850,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           WispBadge(
-            label: isInboxService(service)
-                ? 'Receive files'
-                : service['kind'] == 'file_share'
-                ? 'Share files'
-                : service['kind'] == 'shell'
-                ? 'Shell'
-                : service['kind'] == 'http'
-                ? 'HTTP'
-                : service['kind'].toString().toUpperCase(),
+            label: wispServiceTypeLabel(service['kind'] as String),
             color: WispColors.cyan,
           ),
           if (service['available'] == false) ...[
@@ -1002,7 +900,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!widget.servicesOnly) ...[
-          action('Pair this machine', () => run(invite)),
+          action('Pair this device', () => run(invite)),
           const SizedBox(height: 12),
           DropdownButton<String>(
             isExpanded: true,
@@ -1024,6 +922,8 @@ class _ServiceSettingsState extends State<ServiceSettings> {
           Text(error!, style: const TextStyle(color: WispColors.error)),
         if (status == null)
           const LinearProgressIndicator()
+        else if (widget.createOnly)
+          serviceCreationForm()
         else if (section == 'My services') ...[
           if (widget.serviceId == null) ...[
             for (final s in services.where(
@@ -1043,66 +943,72 @@ class _ServiceSettingsState extends State<ServiceSettings> {
           ] else if (!services.any((s) => s['id'] == widget.serviceId))
             const Text('This service is no longer shared.'),
           for (final s in services.where((s) => s['id'] == widget.serviceId))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: LocalServiceDetails(
-                id: s['id'] as String,
-                kind: s['kind'] as String,
-                host: status!['host']['host'] as String,
-                busy: busy,
-                notices: [
-                  if (s['available'] == false)
-                    const Text(
-                      'Folder access expired or is unavailable. Choose the folder again.',
-                      style: TextStyle(color: WispColors.error),
+            Builder(
+              builder: (context) {
+                final builtIn = s['kind'] == 'shell' || s['kind'] == 'files';
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: LocalServiceDetails(
+                    id: s['id'] as String,
+                    kind: s['kind'] as String,
+                    host: status!['host']['host'] as String,
+                    busy: busy,
+                    removeLabel: builtIn ? 'Disable service' : 'Remove service',
+                    notices: [
+                      if (s['available'] == false)
+                        const Text(
+                          'Folder access expired or is unavailable. Choose the folder again.',
+                          style: TextStyle(color: WispColors.error),
+                        ),
+                    ],
+                    links: [
+                      if (!isFolderService(s) &&
+                          s['kind'] != 'shell' &&
+                          localUrl.isNotEmpty)
+                        addressLink(localUrl),
+                      if (s['kind'] == 'http' &&
+                          publication(s)?['enabled'] == true &&
+                          publication(s)?['url'] is String)
+                        addressLink(
+                          publication(s)!['url'] as String,
+                          publicService: s['id'] as String,
+                        ),
+                    ],
+                    onEdit: () => run(
+                      () => s['kind'] == 'shell'
+                          ? editShell(s)
+                          : s['kind'] == 'files'
+                          ? editFiles(s)
+                          : isFolderService(s)
+                          ? editShare(s)
+                          : editService(s),
                     ),
-                ],
-                links: [
-                  if (!isFolderService(s) &&
-                      s['kind'] != 'shell' &&
-                      localUrl.isNotEmpty)
-                    addressLink(localUrl),
-                  if (s['kind'] == 'http' &&
-                      publication(s)?['enabled'] == true &&
-                      publication(s)?['url'] is String)
-                    addressLink(
-                      publication(s)!['url'] as String,
-                      publicService: s['id'] as String,
+                    onRemove: () => run(
+                      () => confirm(
+                        builtIn ? 'Disable service?' : 'Remove service?',
+                        builtIn
+                            ? 'Disable “${s['id']}” on this device? Paired devices will lose access. This built-in service can be enabled again from its card.'
+                            : isFolderService(s)
+                            ? 'Remove “${s['id']}” from Wispnet? Files on this device will be kept.'
+                            : 'Remove “${s['id']}” from this device’s shared services? Paired devices will lose Wispnet access, and its public URL will stop working. This does not stop or delete the underlying application.',
+                        () => mutate({
+                          'op': builtIn ? 'set_service_enabled' : 'remove',
+                          'id': s['id'],
+                          if (builtIn) ...{
+                            'incarnation': s['incarnation'],
+                            'enabled': false,
+                          },
+                        }, status!['host']['revision'] as int),
+                        danger: true,
+                        confirmLabel: builtIn
+                            ? 'Disable service'
+                            : 'Remove service',
+                      ),
                     ),
-                ],
-                onEdit: () => run(
-                  () => s['kind'] == 'shell'
-                      ? editShell(s)
-                      : s['kind'] == 'files'
-                      ? editFiles(s)
-                      : isFolderService(s)
-                      ? editShare(s)
-                      : editService(s),
-                ),
-                onRemove: () => run(
-                  () => confirm(
-                    'Remove service?',
-                    s['kind'] == 'shell' || s['kind'] == 'files'
-                        ? 'Disable “${s['id']}” on this device? Paired devices will lose access. This built-in service can be enabled again from its card.'
-                        : isFolderService(s)
-                        ? 'Remove “${s['id']}” from Wispnet? Files on this device will be kept.'
-                        : 'Remove “${s['id']}” from this machine’s shared services? Paired devices will lose Wispnet access, and its public URL will stop working. This does not stop or delete the underlying application.',
-                    () => mutate({
-                      'op': s['kind'] == 'shell' || s['kind'] == 'files'
-                          ? 'set_service_enabled'
-                          : 'remove',
-                      'id': s['id'],
-                      if (s['kind'] == 'shell' || s['kind'] == 'files') ...{
-                        'incarnation': s['incarnation'],
-                        'enabled': false,
-                      },
-                    }, status!['host']['revision'] as int),
-                    danger: true,
-                    confirmLabel: 'Remove service',
+                    extraActions: [if (s['kind'] == 'http') ..._public(s)],
                   ),
-                ),
-                extraActions: [if (s['kind'] == 'http') ..._public(s)],
-              ),
+                );
+              },
             ),
         ] else if (section == 'Devices') ...[
           Text(
@@ -1127,7 +1033,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
                     () => run(
                       () => confirm(
                         'Revoke device?',
-                        '${c['peer']}\nRemove access to services on this machine?',
+                        '${c['peer']}\nRemove access to services on this device?',
                         () => mutate({
                           'op': 'revoke',
                           'peer': c['peer'],
@@ -1138,7 +1044,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
                 ],
               ),
             ),
-          SelectableText('This machine’s identity\n${status!['host']['host']}'),
+          SelectableText('This device’s ID\n${status!['host']['host']}'),
         ] else if (section == 'Pairing requests') ...[
           if (requests.isEmpty) const Text('No pending requests.'),
           for (final i in requests)
@@ -1504,6 +1410,150 @@ class _ServiceCreationTabsState extends State<_ServiceCreationTabs> {
             excluding: selected != i,
             child: Offstage(offstage: selected != i, child: widget.children[i]),
           ),
+      ],
+    ),
+  );
+}
+
+class _CustomServiceForm extends StatefulWidget {
+  const _CustomServiceForm({
+    this.service,
+    required this.current,
+    required this.devices,
+    required this.mutate,
+    required this.onSaved,
+  });
+  final Map<String, dynamic>? service;
+  final Map<String, dynamic> current;
+  final List<Map<String, dynamic>> devices;
+  final Future<void> Function(Map<String, dynamic> operation, int revision)
+  mutate;
+  final ValueChanged<bool> onSaved;
+
+  @override
+  State<_CustomServiceForm> createState() => _CustomServiceFormState();
+}
+
+class _CustomServiceFormState extends State<_CustomServiceForm> {
+  late final String? originalId = widget.service?['id'] as String?;
+  late final Uri endpoint = Uri.parse(
+    'tcp://${widget.service?['backend'] ?? '127.0.0.1:8080'}',
+  );
+  late final TextEditingController id = TextEditingController(text: originalId);
+  late final TextEditingController portField = TextEditingController(
+    text: endpoint.port.toString(),
+  );
+  late String kind = widget.service?['kind'] as String? ?? 'http';
+  late final Set<String> allowed =
+      (widget.service?['allow'] as List? ?? []).cast<String>().toSet();
+
+  @override
+  void dispose() {
+    id.dispose();
+    portField.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => _ActionForm(
+    builder: (context, submit, working, failure) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: portField,
+          enabled: !working,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          decoration: const InputDecoration(labelText: 'Port'),
+        ),
+        const SizedBox(height: 12),
+        DropdownButtonFormField<String>(
+          initialValue: kind,
+          decoration: const InputDecoration(
+            labelText: 'Protocol',
+            helperText:
+                'HTTP: websites and APIs with browser links. TCP: raw connections for native apps. UDP services are not supported yet.',
+            helperMaxLines: 5,
+          ),
+          items: ['http', 'tcp']
+              .map(
+                (k) => DropdownMenuItem(value: k, child: Text(k.toUpperCase())),
+              )
+              .toList(),
+          onChanged: working ? null : (v) => setState(() => kind = v!),
+        ),
+        const SizedBox(height: 12),
+        WispServiceIdField(controller: id, enabled: !working),
+        const SizedBox(height: 12),
+        WispPermissionCard(
+          children: [
+            for (final c in widget.devices)
+              WispToggleListTile(
+                contentPadding: EdgeInsets.zero,
+                title: Text(c['name'] as String),
+                subtitle: Text(c['peer'] as String),
+                value: allowed.contains(c['peer']),
+                onChanged: working
+                    ? null
+                    : (v) => setState(() {
+                        if (v!) {
+                          allowed.add(c['peer'] as String);
+                        } else {
+                          allowed.remove(c['peer']);
+                        }
+                      }),
+              ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (failure != null)
+          Text(failure, style: const TextStyle(color: WispColors.error)),
+        FilledButton(
+          onPressed: working
+              ? null
+              : () => submit(() async {
+                  final serviceId = id.text.trim();
+                  if (serviceId == 'shell' || serviceId == 'files') {
+                    throw const FormatException(
+                      '“shell” and “files” are reserved for built-in services. Use their access settings to manage permissions.',
+                    );
+                  }
+                  if (!RegExp(r'^[a-z0-9][a-z0-9._-]{0,63}$')
+                      .hasMatch(serviceId)) {
+                    throw const FormatException('Enter a valid service ID.');
+                  }
+                  if ((widget.current['host']['services'] as List).any(
+                    (s) => s['id'] == serviceId && s['id'] != originalId,
+                  )) {
+                    throw const FormatException(
+                      'This ID exists. Edit that service instead.',
+                    );
+                  }
+                  final port = int.tryParse(portField.text.trim());
+                  if (port == null || port < 1 || port > 65535) {
+                    throw const FormatException(
+                      'Enter a port between 1 and 65535.',
+                    );
+                  }
+                  final host = endpoint.host
+                      .replaceAll('[', '')
+                      .replaceAll(']', '');
+                  final address =
+                      '${host.contains(':') ? '[$host]' : host}:$port';
+                  await widget.mutate({
+                    'op': widget.service == null ? 'service' : 'edit_service',
+                    'id': originalId ?? serviceId,
+                    if (widget.service != null) 'new_id': serviceId,
+                    'backend': address,
+                    'kind': kind,
+                    'allow': allowed.toList(),
+                  }, widget.current['host']['revision'] as int);
+                  widget.onSaved(
+                    widget.service != null && serviceId != originalId,
+                  );
+                }),
+          child: const Text('Save'),
+        ),
       ],
     ),
   );

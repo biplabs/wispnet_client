@@ -513,6 +513,8 @@ class FileSendCommand extends StatelessWidget {
     return WispCommandBlock(
       command: '$prefix /local/file filename',
       copyText: prefix,
+      copyTooltip: 'Copy send command',
+      copyMessage: 'Command prefix copied',
     );
   }
 }
@@ -691,7 +693,7 @@ class _FileSendSheetState extends State<FileSendSheet> {
                   height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : const Icon(Icons.add_to_photos_outlined),
+              : const Icon(Icons.upload_file),
           label: Text(
             picking
                 ? 'Choosing files…'
@@ -846,7 +848,7 @@ class FileTransferList extends StatelessWidget {
                     else if (job.state != 'complete')
                       IconButton(
                         tooltip: job.errorCode == 'TRANSFER_EXPIRED'
-                            ? 'Send again ${job.name}'
+                            ? 'Send ${job.name} again'
                             : 'Resume ${job.name}',
                         onPressed: () => transfers.retry(job),
                         icon: const Icon(Icons.refresh),

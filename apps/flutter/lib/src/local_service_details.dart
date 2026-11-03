@@ -12,13 +12,14 @@ class LocalServiceDetails extends StatelessWidget {
     required this.host,
     required this.onEdit,
     required this.onRemove,
+    this.removeLabel = 'Remove service',
     this.busy = false,
     this.links = const [],
     this.notices = const [],
     this.extraActions = const [],
   });
 
-  final String id, kind, host;
+  final String id, kind, host, removeLabel;
   final bool busy;
   final VoidCallback? onEdit, onRemove;
   final List<Widget> links, notices, extraActions;
@@ -66,7 +67,7 @@ class LocalServiceDetails extends StatelessWidget {
         ...notices,
         const SizedBox(height: 10),
         action('Edit', onEdit),
-        action('Remove service', onRemove, danger: true),
+        action(removeLabel, onRemove, danger: true),
         ...extraActions,
       ],
     ),

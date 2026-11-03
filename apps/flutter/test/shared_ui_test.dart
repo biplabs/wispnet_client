@@ -96,7 +96,7 @@ void main() {
         onSettings: () => settings++,
       ),
     );
-    final icon = find.byIcon(Icons.folder_outlined);
+    final icon = find.byIcon(Icons.move_to_inbox_outlined);
     final title = find.text('Receive files');
     final toggle = find.byType(WispToggle);
     final gear = find.byTooltip('File inbox');
@@ -213,5 +213,36 @@ void main() {
       );
       expect(tester.takeException(), isNull);
     }
+  });
+
+  test('service icons and type labels distinguish protocols and folders', () {
+    expect(wispServiceIcon('shell'), Icons.terminal);
+    expect(wispServiceIcon('files'), Icons.move_to_inbox_outlined);
+    expect(wispServiceIcon('file_inbox'), Icons.move_to_inbox_outlined);
+    expect(wispServiceIcon('file_share'), Icons.folder_outlined);
+    expect(wispServiceIcon('http'), Icons.language);
+    expect(wispServiceIcon('tcp'), Icons.lan_outlined);
+    expect(wispServiceIcon('other'), Icons.dns_outlined);
+
+    expect(wispServiceTypeLabel('shell'), 'Shell');
+    expect(wispServiceTypeLabel('files'), 'File inbox');
+    expect(wispServiceTypeLabel('file_inbox'), 'File inbox');
+    expect(wispServiceTypeLabel('file_share'), 'Shared folder');
+    expect(wispServiceTypeLabel('http'), 'HTTP');
+    expect(wispServiceTypeLabel('tcp'), 'TCP');
+  });
+
+  testWidgets('command block uses generic copy tooltip by default', (
+    tester,
+  ) async {
+    await mountItem(
+      tester,
+      const WispCommandBlock(
+        command: 'wispnet shell demo',
+        copyText: 'wispnet shell demo',
+      ),
+    );
+    expect(find.byTooltip('Copy command'), findsOneWidget);
+    expect(find.byTooltip('Copy send command'), findsNothing);
   });
 }

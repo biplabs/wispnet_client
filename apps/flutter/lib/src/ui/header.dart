@@ -113,7 +113,7 @@ class OnlineButton extends StatelessWidget {
       onTap: onPressed,
       child: ExcludeSemantics(
         child: Tooltip(
-          message: 'Online',
+          message: 'Go offline',
           child: WispInkWell(
             onTap: onPressed,
             customBorder: const StadiumBorder(),
