@@ -249,6 +249,109 @@ mod unix {
         process::{Child, Command},
         sync::mpsc,
     };
+
+    // portable-pty marks its openpty descriptors CLOEXEC after allocating them.
+    // A concurrent fork can inherit that brief unmarked pair. Mark all extra
+    // child descriptors before exec so unrelated commands cannot pin a PTY open.
+    // Compute the fallback bound here, where allocation and filesystem reads are
+    // safe; the child hook below performs only async-signal-safe system calls.
+    pub(super) fn child_fd_limit() -> io::Result<Option<libc::c_int>> {
+        const MAX_FALLBACK_FDS: u64 = 1_048_576;
+        let mut limits = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+        // SAFETY: getrlimit initializes limits on success.
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limits.as_mut_ptr()) } != 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let limits = unsafe { limits.assume_init() };
+        let mut ceiling = if limits.rlim_max != libc::RLIM_INFINITY {
+            limits.rlim_max
+        } else {
+            let maximum = unsafe { libc::sysconf(libc::_SC_OPEN_MAX) };
+            if maximum <= 0 || limits.rlim_cur == libc::RLIM_INFINITY {
+                return Ok(None);
+            }
+            limits.rlim_cur.max(maximum as libc::rlim_t)
+        };
+        // Already-open descriptors remain valid after a limit is lowered.
+        // Include them without doing directory iteration in the forked child.
+        if let Ok(entries) = std::fs::read_dir("/dev/fd") {
+            for entry in entries.flatten() {
+                if let Some(fd) = entry
+                    .file_name()
+                    .to_str()
+                    .and_then(|s| s.parse::<u64>().ok())
+                {
+                    ceiling = ceiling.max(fd.saturating_add(1) as libc::rlim_t);
+                }
+            }
+        }
+        if ceiling as u64 > MAX_FALLBACK_FDS {
+            // Linux's close_range still handles this without a scan; fail closed
+            // if a portable fallback cannot cover the descriptor space cheaply.
+            Ok(None)
+        } else {
+            Ok(Some(ceiling as libc::c_int))
+        }
+    }
+
+    pub(super) fn cloexec_fallback(limit: libc::c_int) -> io::Result<()> {
+        for fd in 3..limit {
+            let flags = loop {
+                let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+                if flags >= 0 {
+                    break flags;
+                }
+                let error = io::Error::last_os_error();
+                match error.raw_os_error() {
+                    Some(libc::EINTR) => continue,
+                    Some(libc::EBADF) => break -1,
+                    _ => return Err(error),
+                }
+            };
+            if flags < 0 || flags & libc::FD_CLOEXEC != 0 {
+                continue;
+            }
+            loop {
+                if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } == 0 {
+                    break;
+                }
+                let error = io::Error::last_os_error();
+                match error.raw_os_error() {
+                    Some(libc::EINTR) => continue,
+                    Some(libc::EBADF) => break,
+                    _ => return Err(error),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn protect_child_fds(builder: &mut Command) -> io::Result<()> {
+        let limit = child_fd_limit()?;
+        // SAFETY: this hook runs after stdio setup. It only changes the child's
+        // descriptor flags with system calls; no allocation or locks occur.
+        unsafe {
+            builder.pre_exec(move || {
+                #[cfg(target_os = "linux")]
+                if libc::syscall(
+                    libc::SYS_close_range,
+                    3_u32,
+                    u32::MAX,
+                    libc::CLOSE_RANGE_CLOEXEC,
+                ) == 0
+                {
+                    return Ok(());
+                }
+                // CLOEXEC preserves Command's error pipe until exec. Closing
+                // descriptors here would hide later pre_exec/exec failures.
+                match limit {
+                    Some(limit) => cloexec_fallback(limit),
+                    None => Err(io::Error::from_raw_os_error(libc::EMFILE)),
+                }
+            });
+        }
+        Ok(())
+    }
     struct Group(Mutex<i32>);
     impl Group {
         fn kill(&self) {
@@ -384,7 +487,7 @@ mod unix {
         } else if let Some(home) = std::env::var_os("HOME").filter(|p| Path::new(p).is_absolute()) {
             builder.current_dir(home);
         }
-        let mut child = match builder.spawn() {
+        let mut child = match protect_child_fds(&mut builder).and_then(|()| builder.spawn()) {
             Ok(child) => child,
             Err(_) => {
                 return fail(
@@ -524,6 +627,7 @@ mod unix {
         } else if let Some(home) = std::env::var_os("HOME").filter(|p| Path::new(p).is_absolute()) {
             builder.current_dir(home);
         }
+        protect_child_fds(&mut builder)?;
         let mut child = builder.spawn()?;
         let group = child
             .id()
@@ -702,6 +806,112 @@ mod tests {
             panic!("missing child pid")
         };
         String::from_utf8(data).unwrap().trim().parse().unwrap()
+    }
+
+    fn inheritable_pipe() -> (std::os::fd::OwnedFd, std::os::fd::OwnedFd) {
+        use std::os::fd::FromRawFd;
+        let mut descriptors = [-1; 2];
+        assert_eq!(unsafe { libc::pipe(descriptors.as_mut_ptr()) }, 0);
+        // SAFETY: pipe returned two newly owned descriptors.
+        let read = unsafe { std::os::fd::OwnedFd::from_raw_fd(descriptors[0]) };
+        let write = unsafe { std::os::fd::OwnedFd::from_raw_fd(descriptors[1]) };
+        let mut limits = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, limits.as_mut_ptr()) },
+            0
+        );
+        let limit = unsafe { limits.assume_init() }.rlim_cur;
+        let minimum = (limit / 2).min(512) as libc::c_int;
+        use std::os::fd::AsRawFd;
+        // F_DUPFD deliberately omits CLOEXEC, reproducing the inherited PTY race
+        // without relying on timing between concurrent openpty and fork calls.
+        let duplicate = unsafe { libc::fcntl(write.as_raw_fd(), libc::F_DUPFD, minimum) };
+        assert!(duplicate >= minimum);
+        let high = unsafe { std::os::fd::OwnedFd::from_raw_fd(duplicate) };
+        drop(write);
+        assert_eq!(unsafe { libc::fcntl(high.as_raw_fd(), libc::F_GETFD) }, 0);
+        (read, high)
+    }
+
+    #[tokio::test]
+    async fn buffered_and_streaming_exec_do_not_inherit_unmarked_high_descriptors() {
+        use std::os::fd::AsRawFd;
+        let (_read, write) = inheritable_pipe();
+        let fd = write.as_raw_fd();
+        let script = format!(
+            "if [ -e /dev/fd/{fd} ]; then printf 'descriptor leaked'; exit 99; fi; printf 'private descriptor closed'"
+        );
+        let manager = SessionManager::default();
+        for streaming in [false, true] {
+            let (mut client, worker) = if streaming {
+                open_stream(&manager, &script).await
+            } else {
+                open(&manager, &script, None, 1000, 65536).await
+            };
+            if streaming {
+                write_client(&mut client, &ClientFrame::StdinEof)
+                    .await
+                    .unwrap();
+            }
+            let (stdout, stderr, code, timed_out, truncated) = collect(&mut client).await;
+            assert_eq!(stdout, b"private descriptor closed");
+            assert!(stderr.is_empty());
+            assert_eq!(code, 0);
+            assert!(!timed_out && !truncated);
+            drop(client);
+            worker.await.unwrap().unwrap();
+            // Only the forked child may change these flags.
+            assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFD) }, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn portable_cloexec_fallback_covers_descriptors_above_lowered_soft_limit() {
+        use std::os::fd::AsRawFd;
+        let (_read, write) = inheritable_pipe();
+        let fd = write.as_raw_fd();
+        let ceiling = unix::child_fd_limit().unwrap().unwrap();
+        assert!(ceiling > fd);
+        let mut builder = tokio::process::Command::new("/bin/sh");
+        builder.args([
+            "-c",
+            &format!("if [ -e /dev/fd/{fd} ]; then exit 99; fi; printf fallback-clean"),
+        ]);
+        // Exercise the portable path even on a Linux kernel with close_range.
+        // Lower only the child's soft limit: existing high handles remain open.
+        unsafe {
+            builder.pre_exec(move || {
+                let mut limits = std::mem::MaybeUninit::<libc::rlimit>::uninit();
+                if libc::getrlimit(libc::RLIMIT_NOFILE, limits.as_mut_ptr()) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                let mut limits = limits.assume_init();
+                limits.rlim_cur = (fd / 2) as libc::rlim_t;
+                if libc::setrlimit(libc::RLIMIT_NOFILE, &limits) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                unix::cloexec_fallback(ceiling)
+            });
+        }
+        let result = builder.output().await.unwrap();
+        assert!(result.status.success(), "{result:?}");
+        assert_eq!(result.stdout, b"fallback-clean");
+        assert_eq!(unsafe { libc::fcntl(fd, libc::F_GETFD) }, 0);
+    }
+
+    #[tokio::test]
+    async fn cloexec_sweep_preserves_spawn_error_reporting() {
+        let mut builder = tokio::process::Command::new("/bin/sh");
+        unix::protect_child_fds(&mut builder).unwrap();
+        // If the sweep closed Command's error pipe, spawn could report success
+        // despite this later pre_exec error. CLOEXEC keeps it usable until exec.
+        unsafe {
+            builder.pre_exec(|| Err(io::Error::from_raw_os_error(libc::EACCES)));
+        }
+        assert_eq!(
+            builder.spawn().unwrap_err().raw_os_error(),
+            Some(libc::EACCES)
+        );
     }
     #[tokio::test]
     async fn native_exec_separates_streams_and_preserves_exit_without_pty() {
