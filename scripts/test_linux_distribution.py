@@ -54,8 +54,7 @@ class DistributionTests(unittest.TestCase):
 
     def install(self, ok=True):
         return self.run_command(
-            sys.executable,
-            str(self.bundle / "scripts/install_node_desktop.py"),
+            str(self.bundle / "scripts/install_node_desktop.sh"),
             "--headless",
             "--no-start",
             ok=ok,
@@ -183,8 +182,7 @@ class DistributionTests(unittest.TestCase):
         systemctl.chmod(0o755)
         self.env["PATH"] = str(tools) + os.pathsep + self.env["PATH"]
         self.run_command(
-            sys.executable,
-            str(self.bundle / "scripts/install_node_desktop.py"),
+            str(self.bundle / "scripts/install_node_desktop.sh"),
             "--no-start",
         )
         destination = self.home / ".local/libexec/wispnet-desktop"
@@ -196,14 +194,14 @@ class DistributionTests(unittest.TestCase):
         self.assertFalse((destination / "wispnet_desktop/app.py").exists())
         self.assertEqual(self.status(), before)
         result = subprocess.run(
-            [sys.executable, str(destination / "desktop_data.py")],
-            input='{"op":"operations"}',
+            [str(destination / "wispnet"), "desktop-bridge"],
+            input='{"id":1,"method":"desktopData","arguments":{"op":"operations"}}\n',
             env=self.env,
             text=True,
             capture_output=True,
             check=True,
         )
-        self.assertEqual(json.loads(result.stdout), [])
+        self.assertEqual(json.loads(result.stdout)["result"]["value"], [])
 
     def test_unit_only_upgrade_restarts_existing_node(self):
         self.install()
@@ -238,8 +236,7 @@ class DistributionTests(unittest.TestCase):
             for changed in (True, False):
                 calls.write_text("")
                 self.run_command(
-                    sys.executable,
-                    str(self.bundle / "scripts/install_node_desktop.py"),
+                    str(self.bundle / "scripts/install_node_desktop.sh"),
                     "--headless",
                 )
                 requests = [json.loads(line) for line in calls.read_text().splitlines()]
@@ -261,12 +258,29 @@ class DistributionTests(unittest.TestCase):
         self.initialize()
         installed = self.installed.read_bytes()
         status = self.status()
-        helper = self.bundle / "scripts/node_request.py"
+        helper = self.bundle / "scripts/install_node_desktop.sh"
         helper.write_text(helper.read_text() + "\n# corrupted\n")
         result = self.install(ok=False)
         self.assertIn("checksum mismatch", result.stderr.lower())
         self.assertEqual(self.installed.read_bytes(), installed)
         self.assertEqual(self.status(), status)
+
+    def test_install_owner_command_and_stdio_bridge_without_python_on_path(self):
+        # The test driver uses Python; every installed process gets an empty PATH.
+        self.env["PATH"] = str(self.root / "no-runtime-tools")
+        self.install()
+        self.initialize()
+        result = subprocess.run(
+            [str(self.installed), "desktop-bridge", "--config", str(self.config)],
+            input='{"id":7,"method":"ownerData","arguments":{"op":"operations"}}\n',
+            env=self.env, text=True, capture_output=True, timeout=15, check=True,
+        )
+        self.assertEqual(json.loads(result.stdout), {"id": 7, "result": {"value": []}})
+        owner = self.home / ".local/bin/wispnet-node"
+        self.assertNotIn("python", owner.read_text().lower())
+        result = self.run_command(str(owner), "--operations")
+        self.assertEqual(json.loads(result.stdout), [])
+        self.assertFalse(any(self.home.rglob("*.py")))
 
     def test_legacy_config_upgrade_preserves_identity_and_installs_named_command(self):
         self.install()
@@ -294,6 +308,8 @@ class DistributionTests(unittest.TestCase):
         manifest = json.loads((self.bundle / "manifest.json").read_text())
         self.assertEqual(manifest["platform"], "linux-x86_64")
         self.assertIn("bin/wispnet", manifest["sha256"])
+        self.assertNotIn("python", manifest)
+        self.assertFalse(any(name.endswith(".py") for name in manifest["sha256"]))
         self.assertNotIn("apps/node/desktop/wispnet_desktop/app.py", manifest["sha256"])
         self.assertNotIn("apps/node/desktop/uv.lock", manifest["sha256"])
         for name, digest in manifest["sha256"].items():

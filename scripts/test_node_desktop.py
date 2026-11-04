@@ -1,6 +1,5 @@
 """Real two-node IPC, permission, browser-gateway and live-connection integration."""
 
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -17,12 +16,25 @@ import http.server
 import http.client
 
 ROOT = Path(__file__).resolve().parents[1]
-spec = importlib.util.spec_from_file_location(
-    "node_api", ROOT / "apps/node/desktop/wispnet_desktop/api.py"
-)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
 BINARY = ROOT / "target/debug/wispnet"
+
+class NativeRejected(ValueError):
+    pass
+
+class NativeNodeAPI:
+    def __init__(self, config):
+        self.config = config
+
+    def request(self, **request):
+        result = subprocess.run(
+            [BINARY, "node-request", "--config", self.config, "--response"],
+            input=json.dumps(request), text=True, capture_output=True, timeout=75,
+        )
+        reply = json.loads(result.stdout)
+        if not reply["ok"]:
+            kind = NativeRejected if reply["kind"] == "rejected" else OSError
+            raise kind(reply["error"])
+        return reply["result"]
 
 
 class NodeIntegration(unittest.TestCase):
@@ -62,7 +74,7 @@ class NodeIntegration(unittest.TestCase):
                     self.assertLess(time.monotonic(), deadline)
                     time.sleep(0.05)
                 self.assertEqual((state / "node.sock").stat().st_mode & 0o777, 0o600)
-                return config, state, peer, port, module.NodeAPI(config)
+                return config, state, peer, port, NativeNodeAPI(config)
 
             release = threading.Event()
 
@@ -88,7 +100,7 @@ class NodeIntegration(unittest.TestCase):
                 b, sb, pb, portb, bapi = host("b")
                 # The desktop IPC exposes the shared diagnostic, while its
                 # native pairing check still rejects an unpaired target.
-                with self.assertRaisesRegex(module.NodeRejected, "Pair with this host first"):
+                with self.assertRaisesRegex(NativeRejected, "Pair with this host first"):
                     api.request(op="diagnose_connection", host=pb)
                 # Target acknowledgements are durable and scoped to this owner-local host.
                 _, _, pc, _, capi = host("combined")
@@ -540,7 +552,7 @@ class NodeIntegration(unittest.TestCase):
                 self.assertEqual(bapi.request(op="status")["host"]["clients"], [])
                 badpath = sa / "node.sock"
                 badpath.chmod(0o666)
-                with self.assertRaises(ValueError):
+                with self.assertRaisesRegex(OSError, "owner-only"):
                     api.request(op="status")
                 badpath.chmod(0o600)
             finally:

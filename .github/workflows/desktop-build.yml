@@ -156,7 +156,7 @@ jobs:
           | macOS 13+ Apple Silicon | wispnet-macos-aarch64.tar.gz |
           | macOS 13+ Intel | wispnet-macos-x86_64.tar.gz |
 
-          Python 3.11+ is required for installation and desktop helpers. The macOS app is ad hoc signed and is not notarized.
+          The installed app and installer use native Rust helpers. The macOS app is ad hoc signed and is not notarized.
 
           A new development release is published after successful builds of main. It is a development snapshot, not a stable v1 release. Project tests run locally before pushing.
           EOF

@@ -7,11 +7,8 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
-from unittest.mock import patch
-import importlib.util
-import sys
 
-from prepare_aur import prepare, SUPPORT, ROOT
+from prepare_aur import prepare, ROOT
 
 
 class ArchPackaging(unittest.TestCase):
@@ -20,10 +17,10 @@ class ArchPackaging(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.bundle = self.root/'wispnet-linux-x86_64'
-        names = ['bin/Wispnet','bin/wispnet','bin/bridge.py','bin/desktop_data.py',
-                 'bin/lib/libflutter_linux_gtk.so','bin/wispnet_desktop/api.py',
+        names = ['bin/Wispnet','bin/wispnet',
+                 'bin/lib/libflutter_linux_gtk.so',
                  'bin/data/flutter_assets/AssetManifest.bin','bin/icon.png',
-                 'scripts/firewall_helper.py','scripts/install_firewall_helper.py','scripts/node_request.py',
+                 'scripts/install_node_desktop.sh',
                  'LICENSE','NOTICE','vendor/iroh/LICENSE-BSD3',
                  'vendor/noq-proto/LICENSE-APACHE','vendor/noq-proto/LICENSE-MIT',
                  'apps/flutter/assets/fonts/Roboto_LICENSE.txt']
@@ -77,6 +74,19 @@ class ArchPackaging(unittest.TestCase):
         self.assertEqual((out/'LICENSE').read_bytes(), (ROOT/'LICENSE').read_bytes())
         self.assertIn(hashlib.sha256(self.archive.read_bytes()).hexdigest(),info)
         self.assertNotIn('SKIP',info)
+        self.assertNotIn('depends = python', info)
+        self.assertFalse(any(n.endswith('.py') or '/__pycache__/' in n for n in names))
+        for name, command in [
+            ('usr/bin/wispnet-node', 'exec /opt/wispnet/bin/wispnet node-request'),
+            ('usr/bin/wispnet-setup', 'exec /opt/wispnet/bin/wispnet package-setup'),
+            ('usr/lib/systemd/system/wispnet-firewall.service',
+             'ExecStart=/opt/wispnet/bin/wispnet firewall-helper'),
+            ('usr/share/libalpm/hooks/wispnet-remove.hook',
+             'Exec = /opt/wispnet/bin/wispnet package-setup --remove'),
+        ]:
+            installed = subprocess.check_output(['bsdtar', '-xOf', str(package), name], text=True)
+            self.assertIn(command, installed)
+            self.assertNotIn('python', installed)
 
     def test_rejects_corrupt_dirty_and_incomplete_releases(self):
         (self.bundle/'bin/wispnet').write_text('tampered')
@@ -113,29 +123,6 @@ class ArchPackaging(unittest.TestCase):
         for changes in [dict(url='https://example.com/latest/binary.tar.gz'),dict(url='https://example.com/$(touch-x)'),
                         dict(version="1'; touch x"),dict(license_id="MIT';touch x"),dict(license_id="MIT")]:
             with self.subTest(changes=changes), self.assertRaises(ValueError):self.generate(**changes)
-
-
-class PackageCleanup(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        sys.path.insert(0,str(SUPPORT.parents[2]/'scripts'))
-        spec=importlib.util.spec_from_file_location('wispnet_package_system',SUPPORT/'package_system.py')
-        cls.module=importlib.util.module_from_spec(spec);spec.loader.exec_module(cls.module)
-
-    def test_cleanup_keeps_user_state_and_aborts_if_rules_cannot_be_removed(self):
-        m=self.module
-        with tempfile.TemporaryDirectory() as temporary:
-            root=Path(temporary);config=root/'firewall.json';config.write_text('{}')
-            with patch.object(m.os,'geteuid',return_value=0),patch.object(m,'CONFIG',config), \
-                 patch.object(m.Path,'iterdir',return_value=iter([])),patch.object(m,'run'), \
-                 patch.object(m.subprocess,'run',return_value=subprocess.CompletedProcess([],3)), \
-                 patch.object(m,'Firewall') as fw:
-                fw.return_value.reconcile.side_effect=RuntimeError('Foreign rule')
-                with self.assertRaises(RuntimeError):m.remove()
-                self.assertTrue(config.exists())
-                fw.return_value.reconcile.side_effect=None
-                m.remove()
-                self.assertFalse(config.exists())
 
 
 if __name__=='__main__':unittest.main()

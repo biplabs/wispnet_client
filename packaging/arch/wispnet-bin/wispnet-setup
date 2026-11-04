@@ -1,2 +1,2 @@
 #!/bin/sh
-exec /usr/bin/python3 -I /opt/wispnet/scripts/package_system.py "$@"
+exec /opt/wispnet/bin/wispnet package-setup "$@"

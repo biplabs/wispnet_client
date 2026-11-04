@@ -1,12 +1,11 @@
 """Verify macOS packaging/install paths without claiming native macOS GUI coverage."""
 
-import contextlib
 import hashlib
-import io
 import json
 import os
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import sys
 import tarfile
@@ -14,7 +13,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import install_macos
 import package_macos
 
 
@@ -37,9 +35,15 @@ class MacDistributionTests(unittest.TestCase):
         (framework / "Versions/A/Example").write_bytes(b"framework payload")
         (framework / "Versions/Current").symlink_to("A")
         (framework / "Example").symlink_to("Versions/Current/Example")
-        cls.binary = Path(os.environ.get(
+        source_binary = Path(os.environ.get(
             "WISPNET_PACKAGE_TEST_BINARY", package_macos.ROOT / "target/debug/wispnet"
         ))
+        # Exercise the actual helper while keeping repeated archive/hash checks
+        # independent of Cargo's large local debug information.
+        cls.binary = cls.directory / "wispnet"
+        shutil.copy2(source_binary, cls.binary)
+        if strip := shutil.which("strip"):
+            subprocess.run([strip, str(cls.binary)], check=True)
 
         def output(command, **kwargs):
             if command[0] == "lipo":
@@ -89,81 +93,82 @@ class MacDistributionTests(unittest.TestCase):
         self.bundle = self.directory / "wispnet-macos-x86_64"
         self.home = self.directory / "home"
         self.home.mkdir()
-        self.installed = self.home / ".local/libexec/wispnet-node/wispnet"
-        self.config = self.home / ".config/wispnet-node/host.toml"
 
-    def install(self, *arguments):
-        real_run = subprocess.run
+    def native_install(self, *arguments):
+        return subprocess.run([
+            str(self.binary), "app-install", "--root", str(self.bundle),
+            "--no-start", *arguments,
+        ], env={**os.environ, "HOME": str(self.home)}, text=True, capture_output=True)
 
-        def run(command, **kwargs):
-            if Path(command[0]).name == "wispnet":
-                return real_run(command, **kwargs)
-            if Path(command[0]).name in {"codesign", "sips", "iconutil", "lsregister"}:
-                return subprocess.CompletedProcess(command, 0)
-            raise AssertionError(f"Unexpected external command: {command}")
-
-        with patch.object(install_macos, "ROOT", self.bundle), \
-             patch.object(install_macos.sys, "platform", "darwin"), \
-             patch.object(install_macos.platform, "machine", return_value="x86_64"), \
-             patch.object(install_macos.sys, "argv", ["install_macos.py", "--no-start", *arguments]), \
-             patch.dict(os.environ, HOME=str(self.home)), \
-             patch.object(install_macos.subprocess, "check_output", side_effect=AssertionError("Checkout command in packaged installer")), \
-             patch.object(install_macos.subprocess, "run", side_effect=run):
-            install_macos.main()
-
-    def status(self):
-        result = subprocess.run([
-            str(self.installed), "host-status", "--config", str(self.config)
-        ], text=True, capture_output=True, check=True)
-        return json.loads(result.stdout)
-
-    def test_extracted_install_preserves_authority_and_framework_symlinks(self):
-        self.install("--init")
-        before = self.status()
-        config = self.config.read_bytes()
-        state = self.home / ".local/state/wispnet-node"
-        original = {p: p.read_bytes() for p in state.iterdir() if p.is_file()}
-        self.install()
-        self.assertEqual(self.status(), before)
-        self.assertEqual(self.config.read_bytes(), config)
-        for path, data in original.items():
-            self.assertEqual(path.read_bytes(), data, path.name)
-        app = self.home / "Applications/Wispnet.app"
+    def test_native_verifier_accepts_framework_symlinks_without_mutating_home(self):
+        result = self.native_install("--verify-only")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("verified", result.stdout.lower())
+        self.assertEqual(list(self.home.iterdir()), [])
+        app = self.bundle / "Wispnet.app"
         framework = app / "Contents/Frameworks/Example.framework"
         self.assertTrue((framework / "Versions/Current").is_symlink())
         self.assertEqual((framework / "Example").read_bytes(), b"framework payload")
-        with (app / "Contents/Info.plist").open("rb") as source:
-            info = plistlib.load(source)
-        self.assertEqual(info["CFBundleVersion"], "42")
-        self.assertEqual(info["WispnetBuildIdentity"], "0.1.0+g123456789abc")
-        self.assertEqual((app / "Contents/MacOS/python-path").read_text(), str(Path(sys.executable).resolve()))
-        self.assertTrue((self.home / "Library/LaunchAgents/app.wispnet.node.plist").exists())
+
+    def test_app_and_launcher_ship_native_helper_without_python_runtime(self):
+        app = self.bundle / "Wispnet.app/Contents/MacOS"
+        self.assertEqual((app / "wispnet").read_bytes(), (self.bundle / "bin/wispnet").read_bytes())
+        manifest = json.loads((self.bundle / "manifest.json").read_text())
+        self.assertNotIn("python", manifest)
+        self.assertFalse(any(p.suffix == ".py" for p in self.bundle.rglob("*")))
+        for name in ["python-path", "bridge.py", "desktop_data.py", "wispnet_desktop"]:
+            self.assertFalse((app / name).exists(), name)
+        launcher = self.bundle / "scripts/install_macos.sh"
+        self.assertTrue(os.access(launcher, os.X_OK))
+        self.assertIn("app-install", launcher.read_text())
+
+    @unittest.skipIf(sys.platform == "darwin", "Cross-platform rejection is exercised on non-Mac hosts")
+    def test_native_installer_rejects_other_platform_before_mutating_home(self):
+        result = self.native_install("--init")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("platform", result.stderr.lower())
+        self.assertEqual(list(self.home.iterdir()), [])
 
     def test_corrupt_payload_is_rejected_before_initializing_or_replacing_files(self):
-        helper = self.bundle / "scripts/node_request.py"
+        helper = self.bundle / "scripts/install_macos.sh"
         helper.write_text(helper.read_text() + "\n# corruption\n")
-        with contextlib.redirect_stderr(io.StringIO()) as error, self.assertRaises(SystemExit):
-            self.install("--init")
-        self.assertIn("checksum mismatch", error.getvalue().lower())
+        result = self.native_install("--verify-only")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("checksum mismatch", result.stderr.lower())
         self.assertEqual(list(self.home.iterdir()), [])
 
     def test_changed_framework_link_is_rejected_before_installation(self):
         link = self.bundle / "Wispnet.app/Contents/Frameworks/Example.framework/Versions/Current"
         link.unlink()
         link.symlink_to(self.directory)
-        with contextlib.redirect_stderr(io.StringIO()) as error, self.assertRaises(SystemExit):
-            self.install("--init")
-        self.assertIn("checksum mismatch", error.getvalue().lower())
+        result = self.native_install("--verify-only")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(result.stderr.strip())
         self.assertEqual(list(self.home.iterdir()), [])
 
-    def test_missing_authority_is_not_recreated_during_upgrade(self):
-        self.install("--init")
-        (self.home / ".local/state/wispnet-node/host.sqlite3").unlink()
-        installed = self.installed.read_bytes()
-        with self.assertRaises(subprocess.CalledProcessError):
-            self.install()
-        self.assertFalse((self.home / ".local/state/wispnet-node/host.sqlite3").exists())
-        self.assertEqual(self.installed.read_bytes(), installed)
+    def test_unlisted_payload_is_rejected_before_installation(self):
+        (self.bundle / "scripts/unlisted.sh").write_text("#!/bin/sh\nexit 0\n")
+        result = self.native_install("--verify-only")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("manifest", result.stderr.lower())
+        self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_required_installer_cannot_be_removed_even_with_modified_manifest(self):
+        self.assert_required_payload("scripts/install_macos.sh")
+
+    def test_required_desktop_helper_cannot_be_removed_even_with_modified_manifest(self):
+        self.assert_required_payload("Wispnet.app/Contents/MacOS/wispnet")
+
+    def assert_required_payload(self, name):
+        (self.bundle / name).unlink()
+        path = self.bundle / "manifest.json"
+        manifest = json.loads(path.read_text())
+        manifest["sha256"].pop(name)
+        path.write_text(json.dumps(manifest))
+        result = self.native_install("--verify-only")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("required", result.stderr.lower())
+        self.assertEqual(list(self.home.iterdir()), [])
 
     def test_archive_checksum_manifest_and_licenses(self):
         expected = self.archive.with_name(self.archive.name + ".sha256").read_text().split()[0]

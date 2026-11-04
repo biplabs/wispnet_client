@@ -12,7 +12,7 @@ For an already initialized schema-2 node using `~/.config/wispnet-node/host.toml
 
 ```sh
 cargo build --workspace --locked
-python3 scripts/install_node_desktop.py
+scripts/install_node_desktop.sh
 wispnet-desktop
 ```
 
@@ -25,8 +25,8 @@ when the window is wide.
 
 Build prerequisites are Flutter 3.47.7, Clang, CMake, Ninja, pkg-config, GTK 3 and
 Ayatana AppIndicator development libraries. Runtime needs GTK/AppIndicator,
-`xdg-open`, and Python 3.11+ for the existing private node/cache/owner-operation
-adapter. WebKitGTK, Tauri, Qt and PySide are not used by the installed Flutter UI.
+`xdg-open`. The private node/cache/owner-operation adapter is compiled into the
+native Rust executable. WebKitGTK, Tauri, Qt and PySide are not used by the installed Flutter UI.
 The installer builds and stages the complete Flutter release bundle before
 switching the launcher. Identity, configuration, grants, pairings, catalog cache,
 private machine names and card ordering are retained. Tauri preferences are read
@@ -55,7 +55,7 @@ for controls and feature details.
 The same installer automatically selects node-only mode when `graphical-session.target` is inactive. Force it explicitly with:
 
 ```sh
-python3 scripts/install_node_desktop.py --headless
+scripts/install_node_desktop.sh --headless
 ~/.local/libexec/wispnet-node/wispnet host-status --config ~/.config/wispnet-node/host.toml
 # Query the running node without a second identity lease:
 printf '%s\n' '{"op":"catalog","host":"PINNED_HOST_ID"}' | ~/.local/bin/wispnet-node

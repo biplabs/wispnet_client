@@ -96,12 +96,10 @@ def uninstall(home, uid):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
-    if os.geteuid() == 0:
-        parser.error('Run as your regular user, without sudo; firewall cleanup requests sudo separately')
-    uninstall(Path.home(), os.getuid())
-    print('Wispnet and its managed SSH aliases uninstalled. Other SSH settings, configuration, identities, pairing and private state preserved.')
+    # Legacy developer entry point; target installations run the native helper.
+    import sys
+    script = Path(__file__).with_suffix(".sh")
+    os.execv(str(script), [str(script), *sys.argv[1:]])
 
 
 if __name__ == '__main__':

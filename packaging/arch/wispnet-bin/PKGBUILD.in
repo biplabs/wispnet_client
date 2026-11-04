@@ -6,33 +6,26 @@ pkgdesc='Connect your devices and access their services'
 arch=('x86_64')
 url='https://wispnet.app'
 license=('Apache-2.0')
-depends=('glibc>=@GLIBC@' 'gcc-libs' 'python>=3.11' 'systemd' 'iptables' 'gtk3' 'libayatana-appindicator' 'xdg-utils' 'ffmpeg')
+depends=('glibc>=@GLIBC@' 'gcc-libs' 'systemd' 'iptables' 'gtk3' 'libayatana-appindicator' 'xdg-utils' 'ffmpeg')
 provides=("wispnet=$pkgver")
 conflicts=('wispnet' 'wispnet-git')
 options=('!strip' '!debug')
 install=wispnet-bin.install
 source=("wispnet-${pkgver}-linux-x86_64.tar.gz::@URL@"
         'wispnet-host.service' 'wispnet-desktop.service' 'wispnet-firewall.service'
-        'wispnet.desktop' 'wispnet-setup' 'package_system.py' 'wispnet-remove.hook' 'LICENSE' 'NOTICE')
+        'wispnet.desktop' 'wispnet-setup' 'wispnet-remove.hook' 'LICENSE' 'NOTICE')
 sha256sums=(@CHECKSUMS@)
 
 package() {
     local bundle="$srcdir/wispnet-linux-x86_64"
     install -dm755 "$pkgdir/opt/wispnet"
     cp -a "$bundle/bin" "$pkgdir/opt/wispnet/"
-    # Builder-specific interpreter paths and bytecode are never distributed.
-    find "$pkgdir/opt/wispnet" -type d -name __pycache__ -prune -exec rm -rf {} +
-    printf '/usr/bin/python3\n' > "$pkgdir/opt/wispnet/bin/python-path"
-    install -dm755 "$pkgdir/opt/wispnet/scripts"
-    install -m644 "$bundle"/scripts/{firewall_helper,install_firewall_helper,node_request}.py "$pkgdir/opt/wispnet/scripts/"
-    install -m644 "$srcdir/package_system.py" "$pkgdir/opt/wispnet/scripts/"
-    cp -a "$bundle/bin/wispnet_desktop" "$pkgdir/opt/wispnet/scripts/"
-    install -Dm755 "$srcdir/wispnet-setup" "$pkgdir/usr/bin/wispnet-setup"
     install -dm755 "$pkgdir/usr/bin"
     ln -s /opt/wispnet/bin/wispnet "$pkgdir/usr/bin/wispnet"
     ln -s /opt/wispnet/bin/Wispnet "$pkgdir/usr/bin/wispnet-desktop"
-    printf '#!/bin/sh\nexec /usr/bin/python3 /opt/wispnet/scripts/node_request.py "$@"\n' > "$pkgdir/usr/bin/wispnet-node"
+    printf '#!/bin/sh\nexec /opt/wispnet/bin/wispnet node-request "$@"\n' > "$pkgdir/usr/bin/wispnet-node"
     chmod 755 "$pkgdir/usr/bin/wispnet-node"
+    install -Dm755 "$srcdir/wispnet-setup" "$pkgdir/usr/bin/wispnet-setup"
     install -Dm644 "$srcdir/wispnet-host.service" "$pkgdir/usr/lib/systemd/user/wispnet-host.service"
     install -Dm644 "$srcdir/wispnet-desktop.service" "$pkgdir/usr/lib/systemd/user/wispnet-desktop.service"
     install -Dm644 "$srcdir/wispnet-firewall.service" "$pkgdir/usr/lib/systemd/system/wispnet-firewall.service"

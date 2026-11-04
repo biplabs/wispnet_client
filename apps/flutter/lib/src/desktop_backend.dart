@@ -11,7 +11,7 @@ import 'pairing_qr.dart';
 
 /// Private pipes to the existing owner API adapter. No HTTP management server.
 class DesktopBackend implements WispnetBackend {
-  DesktopBackend({this.helper, this.python}) {
+  DesktopBackend({this.helper}) {
     shell.setMethodCallHandler((call) async {
       if (call.method == 'exit') {
         await invoke('setAccess', {'enabled': false});
@@ -19,7 +19,7 @@ class DesktopBackend implements WispnetBackend {
     });
   }
   static const shell = MethodChannel('app.wispnet/desktop');
-  final String? helper, python;
+  final String? helper;
   Future<Process>? _starting;
   Future<void>? _startup;
   final _pending = <int, Completer<Map<String, dynamic>>>{};
@@ -28,15 +28,19 @@ class DesktopBackend implements WispnetBackend {
 
   Future<Process> _start() async {
     final directory = File(Platform.resolvedExecutable).parent;
-    final installed = File('${directory.path}/bridge.py');
-    final source = File('${Directory.current.path}/desktop/bridge.py');
-    final script =
-        helper ?? (installed.existsSync() ? installed.path : source.path);
-    final runtime = File('${directory.path}/python-path');
+    final bundled = File('${directory.path}/wispnet');
+    final installed = File(
+      '${Platform.environment['HOME']}/.local/libexec/wispnet-node/wispnet',
+    );
+    final source = File('${Directory.current.path}/../../target/debug/wispnet');
     final executable =
-        python ??
-        (runtime.existsSync() ? runtime.readAsStringSync().trim() : 'python3');
-    final process = await Process.start(executable, [script]);
+        helper ??
+        (bundled.existsSync()
+            ? bundled.path
+            : source.existsSync()
+            ? source.path
+            : installed.path);
+    final process = await Process.start(executable, ['desktop-bridge']);
     process.stdout
         .transform(utf8.decoder)
         .transform(const LineSplitter())

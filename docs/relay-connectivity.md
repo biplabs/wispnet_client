@@ -385,12 +385,12 @@ on the new gateway. A lease from home Wi-Fi is not treated as a hotspot lease.
 
 ## Linux local firewall helper
 
-`python3 scripts/install_node_desktop.py --configure-firewall` requests one-time
+`scripts/install_node_desktop.sh --configure-firewall` requests one-time
 administrator setup. Headless installs use sudo; graphical installs use pkexec
 when available. The standalone setup command is:
 
 ```sh
-sudo python3 scripts/install_firewall_helper.py --uid "$(id -u)"
+sudo scripts/install_firewall_helper.sh --uid "$(id -u)"
 ```
 
 The root-owned system service follows only the configured user's
@@ -414,8 +414,7 @@ and cleanup is attempted; do not assume a failed firewall command took effect.
 The helper has no listening socket or general privileged command interface.
 Its systemd capability set permits netfilter operations and inspection of the
 configured process's descriptors (`CAP_SYS_PTRACE`/`CAP_DAC_READ_SEARCH`); the
-service sandbox makes system/home configuration read-only. Python runs isolated
-from user module paths. Root configuration limits which user services qualify.
+service sandbox makes system/home configuration read-only. The helper is a native Rust executable. Root configuration limits which user services qualify.
 The installer copies the helper to root-owned storage; no user-writable code runs
 privileged after installation. Updates to the installed helper require another
 administrator installation.

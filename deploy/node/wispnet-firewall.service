@@ -3,7 +3,7 @@ Description=Wispnet verified UDP firewall rules
 After=network.target ufw.service
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 -I /usr/local/libexec/wispnet-firewall.py
+ExecStart=/usr/local/libexec/wispnet-firewall firewall-helper
 Restart=on-failure
 RestartSec=2
 RuntimeDirectory=wispnet-firewall

@@ -58,13 +58,10 @@ def package(binary, app, output):
             "vendor/noq-proto/LICENSE-APACHE", "vendor/noq-proto/LICENSE-MIT",
             "crates/shell/LICENSE", "crates/shell/NOTICE.md",
             "apps/flutter/assets/fonts/Roboto_LICENSE.txt",
-            "scripts/install_macos.py", "scripts/node_request.py", "scripts/mcp_headers.py",
-            "apps/flutter/desktop/desktop_data.py", "apps/node/desktop/icon.png", "README.md",
+            "scripts/install_macos.sh", "scripts/uninstall_node_desktop.sh",
+            "apps/node/desktop/icon.png", "README.md",
         ]
         files.extend(str(p.relative_to(ROOT)) for p in (ROOT / "docs").rglob("*.md"))
-        files.extend(f"apps/node/desktop/wispnet_desktop/{name}" for name in [
-            "__init__.py", "api.py", "combined.py", "catalog_cache.py",
-        ])
         for name in sorted(set(files)):
             destination = tree / name
             destination.parent.mkdir(parents=True, exist_ok=True)
@@ -72,6 +69,13 @@ def package(binary, app, output):
         (tree / "bin").mkdir()
         shutil.copy2(binary, tree / "bin/wispnet")
         shutil.copytree(app, tree / "Wispnet.app", symlinks=True)
+        native_helper = tree / "Wispnet.app/Contents/MacOS/wispnet"
+        shutil.copy2(binary, native_helper)
+        for name in ["bridge.py", "desktop_data.py", "python-path"]:
+            (native_helper.parent / name).unlink(missing_ok=True)
+        for name in ["wispnet_desktop", "__pycache__"]:
+            shutil.rmtree(native_helper.parent / name, ignore_errors=True)
+        subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(tree / "Wispnet.app")], check=True)
         hashes = {}
         symlinks = {}
         for path in sorted(tree.rglob("*")):
@@ -90,7 +94,7 @@ def package(binary, app, output):
             )),
             "build_identity": build_identity, "source_count": count,
             "version": build_identity.split("+", 1)[0], "platform": f"macos-{arch}",
-            "minimum_macos": "13.0", "python": ">=3.11", "desktop": "flutter",
+            "minimum_macos": "13.0", "desktop": "flutter",
             "sha256": hashes, "symlinks": symlinks,
         }
         (tree / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")

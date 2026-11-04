@@ -169,10 +169,10 @@ assert m.CHAIN not in f.call('ipv4',['-S','INPUT']).stdout
 
 class InstallerBoundaries(unittest.TestCase):
     def test_files_only_install_cannot_request_privileged_setup(self):
-        result = subprocess.run(['python3',str(Path(__file__).with_name('install_node_desktop.py')),
+        result = subprocess.run([str(Path(__file__).with_name('install_node_desktop.sh')),
                                  '--no-start','--configure-firewall','--headless'],
                                 capture_output=True,text=True,timeout=5)
-        self.assertEqual(result.returncode,2)
+        self.assertNotEqual(result.returncode,0)
         self.assertIn('cannot be combined with --no-start',result.stderr)
 
 

@@ -1,9 +1,10 @@
 # Linux release bundles
 
 The Linux x86_64 bundle contains the native node, dependency-free owner CLI,
-Flutter desktop, service units, stdlib Python owner helpers and setup guides.
+Flutter desktop, service units, native owner helpers and setup guides.
 Installing it requires no Git checkout, Cargo or Rust toolchain. Each computer
-owns its own identity and authority. A headless computer needs no display or Qt.
+owns its own identity and authority. Python is used only on development/build
+hosts; downloaded bundles install and run without Python. A headless computer needs no display or Qt.
 
 ## Build and verify
 
@@ -29,8 +30,8 @@ checksum from a trusted release source. It is not a signed release attestation.
 
 Only native Linux x86_64/glibc is packaged. The target must meet the binary's
 `minimum_glibc` in the manifest and have libgcc and libm. Other architectures,
-musl, macOS and Windows are unsupported by this bundle. All targets need Python
-3.11+ and a working systemd user manager. GUI targets additionally need GTK 3, Ayatana AppIndicator and `xdg-open`. No Qt/PySide environment is installed.
+musl, macOS and Windows are unsupported by this bundle. All targets need a
+working systemd user manager. GUI targets additionally need GTK 3, Ayatana AppIndicator and `xdg-open`. No Qt/PySide environment is installed.
 Build hosts need Flutter 3.47.7, Clang, CMake, Ninja, the corresponding development packages and `pkg-config`.
 `--headless` builds a node-only bundle; its installer refuses GUI installation
 before changing installed files. `--desktop-binary /absolute/Wispnet` packages an
@@ -65,7 +66,7 @@ First verify the archive checksum. Extract into a new directory rather than
 overlaying an earlier extraction. Stage the node without enabling or starting it:
 
 ```sh
-python3 scripts/install_node_desktop.py --headless --no-start
+scripts/install_node_desktop.sh --headless --no-start
 mkdir -p ~/.config/wispnet-node
 chmod 700 ~/.config/wispnet-node
 cp -n config/node/host.toml ~/.config/wispnet-node/host.toml
@@ -84,7 +85,7 @@ Do not copy another computer's state, identity or owner token.
 
 ```sh
 ~/.local/libexec/wispnet-node/wispnet host-init --config ~/.config/wispnet-node/host.toml
-python3 scripts/install_node_desktop.py --headless
+scripts/install_node_desktop.sh --headless
 systemctl --user is-active wispnet-host.service
 wispnet-node
 ```
@@ -122,7 +123,7 @@ does not implement recovery or promise arbitrary downgrade compatibility.
 To remove program files while retaining private state:
 
 ```sh
-python3 scripts/uninstall_node_desktop.py
+scripts/uninstall_node_desktop.sh
 ```
 
 Run from the extracted bundle as your regular user. The uninstaller stops and
@@ -136,7 +137,7 @@ No unrelated UFW rules are deleted.
 To remove only this user's automatic firewall integration:
 
 ```sh
-sudo python3 scripts/uninstall_firewall_helper.py --uid "$(id -u)"
+sudo scripts/uninstall_firewall_helper.sh --uid "$(id -u)"
 ```
 
 These commands leave config and state in place. To reinstall, use the same config

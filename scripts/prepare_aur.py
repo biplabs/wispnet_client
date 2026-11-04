@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 SUPPORT = ROOT / 'packaging/arch/wispnet-bin'
 FILES = ['wispnet-host.service', 'wispnet-desktop.service', 'wispnet-firewall.service',
-         'wispnet.desktop', 'wispnet-setup', 'package_system.py', 'wispnet-remove.hook']
+         'wispnet.desktop', 'wispnet-setup', 'wispnet-remove.hook']
 
 
 def prepare(archive, output, version, url, license_id="Apache-2.0", license_file=None, allow_dirty=False):
@@ -45,13 +45,13 @@ def prepare(archive, output, version, url, license_id="Apache-2.0", license_file
             path = bundle/name
             if Path(name).is_absolute() or '..' in Path(name).parts or path.is_symlink() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
                 raise ValueError('Bundle checksum mismatch: '+name)
-        for name in ['bin/Wispnet', 'bin/wispnet', 'bin/bridge.py', 'bin/desktop_data.py',
-                     'bin/lib/libflutter_linux_gtk.so', 'bin/wispnet_desktop/api.py',
+        for name in ['bin/Wispnet', 'bin/wispnet',
+                     'bin/lib/libflutter_linux_gtk.so',
                      'bin/data/flutter_assets/AssetManifest.bin',
                      'LICENSE', 'NOTICE', 'vendor/iroh/LICENSE-BSD3',
                      'vendor/noq-proto/LICENSE-APACHE', 'vendor/noq-proto/LICENSE-MIT',
                      'apps/flutter/assets/fonts/Roboto_LICENSE.txt',
-                     'scripts/firewall_helper.py', 'scripts/install_firewall_helper.py', 'scripts/node_request.py']:
+                     'scripts/install_node_desktop.sh']:
             if name not in manifest['sha256']:
                 raise ValueError('Missing desktop release payload: '+name)
         if (bundle/'LICENSE').read_bytes() != license_file.read_bytes():

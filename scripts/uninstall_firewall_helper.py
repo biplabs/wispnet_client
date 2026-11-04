@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+from pathlib import Path
 import subprocess
 
 from firewall_helper import configured_uids, Firewall
@@ -31,13 +32,10 @@ def uninstall(uid):
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--uid', type=int, required=True)
-    args = parser.parse_args()
-    if os.geteuid() != 0 or not 0 < args.uid < 2**32:
-        parser.error('Run as administrator and specify a non-root user ID')
-    uninstall(args.uid)
-    print('Firewall access removed for this user; shared helper retained only if needed.')
+    # Legacy developer entry point; target installations run the native helper.
+    import sys
+    script = Path(__file__).with_suffix(".sh")
+    os.execv(str(script), [str(script), *sys.argv[1:]])
 
 
 if __name__ == '__main__':

@@ -20,9 +20,9 @@ Wispnet brings your self-hosted services into one directory and makes them acces
 
 - `apps/node/daemon`: running Linux/macOS node and private desktop API.
 - `apps/node/cli`: owner commands and the node executable.
-- `apps/node/desktop`: stdlib Python owner/cache helpers and their tests (no GUI runtime).
+- `apps/node/desktop`: desktop icons and Python reference fixtures for development tests.
 - `apps/flutter`: shared Android/desktop Flutter UI and native Linux/macOS runners.
-- `apps/flutter/desktop`: private Python bridge, desktop persistence and adapter tests.
+- `apps/node/cli/src/{desktop,owner,firewall,install}.rs`: native desktop bridge, owner helpers, firewall and installation.
 - `apps/flutter/android`: Android runner, native services, Gradle wrapper and Rust JNI adapter in `native/`.
 - `crates/core`, `crates/agent`, `crates/registry`, `crates/client`: shared protocol, peer transport, host-local authority and protected browser client/gateway.
 - `crates/shell`: WispShell-derived shell protocol, PTY sessions and reconnect history.

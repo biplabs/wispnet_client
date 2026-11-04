@@ -1,6 +1,10 @@
 use std::{env, path::PathBuf, process::ExitCode};
+mod desktop;
 mod files;
+mod firewall;
+mod install;
 mod manage;
+mod owner;
 mod retry;
 mod shell;
 mod tui;
@@ -16,6 +20,11 @@ Interactive management: wispnet [--config /absolute/path/host.toml]
 Pairing code: wispnet --pairing-code [--config /absolute/path/host.toml]
 QR pairing: wispnet --qrcode [--config /absolute/path/host.toml]
 Usage: wispnet <check|identity-init|status|agent|registry|registry-init|registry-backup|registry-directory> --config /absolute/path/config.toml
+Owner automation: wispnet node-request [--config CONFIG] [--response] [--request FILE | --batch PLAN | --retry ID | --operations]
+Desktop adapter: wispnet desktop-bridge [--config CONFIG]
+Install: wispnet app-install --root BUNDLE [--headless] [--no-start] [--init]
+Uninstall: wispnet app-uninstall
+Firewall: wispnet firewall-install --uid UID | firewall-uninstall --uid UID
 Backup: wispnet registry-backup --config /absolute/path/config.toml --output /absolute/path/new-backup.sqlite3
 Host: wispnet <host-init|host-status> --config /absolute/path/host.toml
 Host invitations: wispnet host-invitations --config /absolute/path/host.toml
@@ -29,6 +38,26 @@ Tunnel mode relays raw stdin/stdout. It is not a browser gateway. Independent ho
 
 fn main() -> ExitCode {
     let shell_args: Vec<_> = env::args_os().skip(1).collect();
+    let native = match shell_args.first().and_then(|arg| arg.to_str()) {
+        Some("desktop-bridge") => Some(desktop::run_args(&shell_args[1..])),
+        Some("node-request") => Some(owner::run_args(&shell_args[1..])),
+        Some("firewall-helper") => Some(firewall::run_args(&shell_args[1..])),
+        Some("firewall-install") => Some(firewall::install_args(&shell_args[1..])),
+        Some("firewall-uninstall") => Some(firewall::uninstall_args(&shell_args[1..])),
+        Some("app-install") => Some(install::run_args(&shell_args[1..])),
+        Some("app-uninstall") => Some(install::uninstall_args(&shell_args[1..])),
+        Some("package-setup") => Some(install::package_args(&shell_args[1..])),
+        _ => None,
+    };
+    if let Some(outcome) = native {
+        return match outcome {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                eprintln!("wispnet: {error}");
+                ExitCode::FAILURE
+            }
+        };
+    }
     #[cfg(feature = "ssh-adapter")]
     if shell_args.first().is_some_and(|a| a == "ssh-bridge") {
         return match wispnet_ssh_adapter::run_args(&shell_args[1..]) {

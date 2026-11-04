@@ -184,9 +184,10 @@ startup_timeout_sec = 15
 tool_timeout_sec = 35
 ```
 
-Restart/reconnect the MCP client after registration. Older configurations using
-`mcp_headers.py` remain compatible: the helper now returns empty headers without
-reading or sending credentials. Existing `mcp-token` files are unused. See the
+Restart/reconnect the MCP client after registration. Remove the obsolete
+`http_headers_helper` setting from older configurations: local MCP uses no
+credentials, and the native installation no longer installs `mcp_headers.py`.
+Existing `mcp-token` files are unused. See the
 [Codex MCP configuration documentation](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
 
 Tools include service discovery/link resolution, gateway settings, port changes

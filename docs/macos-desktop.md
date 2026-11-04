@@ -2,17 +2,17 @@
 
 Wispnet uses the shared Flutter UI in `apps/flutter`, with its native macOS
 runner in `apps/flutter/macos`. The node runs independently of the desktop.
-The private Python bridge and persistence helpers live in `apps/flutter/desktop`;
-the shared node API, catalog cache and owner-operation journals remain in
-`apps/node/desktop/wispnet_desktop`.
+The private desktop bridge, persistence, node API, catalog cache and owner
+operations are compiled into the Rust executable in `apps/node/cli/src` and
+communicate through private pipes and the owner-only node socket.
 
 ## Install a release bundle
 
 Download the macOS archive and its `.sha256` sidecar from the GitHub Release.
 Use `wispnet-macos-aarch64.tar.gz` for Apple Silicon or
-`wispnet-macos-x86_64.tar.gz` for Intel. The installed app requires macOS 13+
-and Python 3.11 or newer. Rust, Flutter and a source checkout are unnecessary
-when installing a release bundle.
+`wispnet-macos-x86_64.tar.gz` for Intel. The installed app requires macOS 13+. Rust, Flutter and a source checkout are unnecessary
+when installing a release bundle. Python is used only for development/build
+tooling; installation and runtime use native Rust helpers.
 
 For Apple Silicon, verify and extract into a new directory:
 
@@ -20,7 +20,7 @@ For Apple Silicon, verify and extract into a new directory:
 shasum -a 256 --check wispnet-macos-aarch64.tar.gz.sha256
 tar -xzf wispnet-macos-aarch64.tar.gz
 cd wispnet-macos-aarch64
-python3 scripts/install_macos.py --init
+scripts/install_macos.sh --init
 ```
 
 Substitute `x86_64` for an Intel Mac. Use `--init` only when creating a new
@@ -34,8 +34,7 @@ publisher.
 
 The app is signed ad hoc. Developer ID signing, notarization and App Store
 distribution are not implemented; macOS may require approval to open downloaded
-software. The installer updates the app's private Python path to the interpreter
-used on your Mac.
+software.
 
 ## Build and install from source
 
@@ -44,7 +43,7 @@ Rust toolchain, and Python 3.11 or newer. The installed app requires macOS 13+.
 
 ```sh
 scripts/install-hooks.sh
-python3 scripts/install_macos.py --init
+scripts/install_macos.sh --init
 ```
 
 Use `--init` only to explicitly initialize a new independent host. For upgrades,
@@ -79,8 +78,8 @@ scripts/test_flutter.sh
 scripts/test.sh
 ```
 
-The desktop build script bundles the Flutter engine/assets, private Python
-adapter and shared owner/cache helpers. The installer stages the app and retains
+The desktop build script bundles the Flutter engine/assets and native Rust
+adapter with shared owner/cache helpers. The installer stages the app and retains
 `Wispnet.previous.app` under `~/Library/Application Support/Wispnet/Backups/`
 when replacing an existing installation, keeping backups out of Applications.
 Extra launches reveal the existing desktop instead of starting a second copy.

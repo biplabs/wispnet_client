@@ -56,15 +56,11 @@ def package(binary, output, desktop_binary=None):
             "crates/shell/LICENSE",
             "crates/shell/NOTICE.md",
             "apps/flutter/assets/fonts/Roboto_LICENSE.txt",
-            "scripts/install_node_desktop.py",
-            "scripts/node_request.py",
-            "scripts/mcp_headers.py",
-            "scripts/firewall_helper.py",
-            "scripts/install_firewall_helper.py",
-            "scripts/uninstall_firewall_helper.py",
-            "scripts/uninstall_node_desktop.py",
+            "scripts/install_node_desktop.sh",
+            "scripts/install_firewall_helper.sh",
+            "scripts/uninstall_firewall_helper.sh",
+            "scripts/uninstall_node_desktop.sh",
             "deploy/node/wispnet-firewall.service",
-            "apps/flutter/desktop/desktop_data.py",
             "deploy/node/wispnet-host.service",
             "deploy/node/wispnet-desktop.service",
             "config/node/host.toml",
@@ -75,10 +71,6 @@ def package(binary, output, desktop_binary=None):
         desktop = ROOT / "apps/node/desktop"
         files.extend(
             str((desktop / name).relative_to(ROOT)) for name in ["icon.png", "icon.svg"]
-        )
-        files.extend(
-            str((desktop / "wispnet_desktop" / name).relative_to(ROOT))
-            for name in ["__init__.py", "api.py", "combined.py", "catalog_cache.py"]
         )
         files.extend(str(p.relative_to(ROOT)) for p in (ROOT / "docs").rglob("*.md"))
         files.append("README.md")
@@ -92,6 +84,13 @@ def package(binary, output, desktop_binary=None):
             shutil.copytree(desktop_binary.parent, tree / "bin", dirs_exist_ok=True)
         elif desktop_binary is not None:
             shutil.copy2(desktop_binary, tree / "bin/Wispnet")
+        # The explicitly selected node also supplies the desktop adapter.
+        shutil.copy2(binary, tree / "bin/wispnet")
+        # Remove stale Python assets from reused Flutter build directories.
+        for stale in ["bridge.py", "desktop_data.py", "python-path"]:
+            (tree / "bin" / stale).unlink(missing_ok=True)
+        for stale in ["wispnet_desktop", "__pycache__"]:
+            shutil.rmtree(tree / "bin" / stale, ignore_errors=True)
         for executable in [tree / "bin/wispnet", *([tree / "bin/Wispnet"] if desktop_binary is not None else [])]:
             subprocess.run(["strip", "--strip-debug", str(executable)], check=True)
         hashes = {
@@ -118,7 +117,6 @@ def package(binary, output, desktop_binary=None):
                     ),
                     "platform": "linux-x86_64",
                     "minimum_glibc": glibc,
-                    "python": ">=3.11",
                     "desktop": "flutter" if flutter_bundle else "native" if desktop_binary is not None else "headless",
                     "sha256": hashes,
                 },

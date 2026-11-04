@@ -114,16 +114,19 @@ WISPNET_SCREENSHOTS=/tmp/wispnet-flutter ../../scripts/flutter.sh test
 
 ```sh
 scripts/build_flutter_desktop.sh
-python3 scripts/install_node_desktop.py   # existing initialized Linux node
-# On a Mac: python3 scripts/install_macos.py
+scripts/install_node_desktop.sh   # existing initialized Linux node
+# On a Mac: scripts/install_macos.sh
 ```
 
-Flutter desktop bundles include the engine, assets and the private Python adapter.
-`desktop/bridge.py` uses the existing `NodeAPI`, `CatalogCache` and `Combined`
+Flutter desktop bundles include the engine, assets and the native Rust adapter.
+`wispnet desktop-bridge` uses the shared node API, catalog cache and durable owner
 operations through private stdin/stdout pipes. It creates no management listener
 and never imports the node key. The adapter keeps polling independent of bounded
 network operations, checks the socket's owner/permissions and preserves the
 existing lifecycle (switching Online off stops the node; quitting the UI leaves it running).
+
+Python remains available for build scripts and reference development tests; it is
+not installed or launched by the desktop bundles.
 
 Private labels and ordering are imported read-only from Tauri WebKit local storage
 and the earlier desktop preference files. New display preferences live in
@@ -131,15 +134,14 @@ owner-only `desktop-flutter.json` in the existing state directory; cached catalo
 remain display-only. Opening any service asks its current owner again with the
 exact incarnation. The installer stages complete runtimes and switches the
 launcher only after the replacement builds, retaining previous Flutter runtimes for recovery.
-The retired Tauri app has been removed. The private desktop persistence helper
-and its tests live beside the bridge in `apps/flutter/desktop`.
+The private desktop persistence helper and its tests live in
+`apps/node/cli/src/owner.rs` and `desktop.rs`.
 
 Linux build prerequisites: Flutter, Clang, CMake, Ninja, pkg-config, GTK 3 and
-Ayatana AppIndicator development libraries. Runtime also requires Python 3.11+
-and xdg-open. Linux camera QR scanning uses FFmpeg with V4L2; the Arch package
+Ayatana AppIndicator development libraries. Runtime also requires xdg-open. Linux camera QR scanning uses FFmpeg with V4L2; the Arch package
 includes FFmpeg as a dependency. Camera availability follows detected hardware,
 and image import remains available without a camera. macOS uses AVFoundation for
-camera capture and its existing Python runtime, launch agents and menu bar.
+camera capture, native Rust helpers, launch agents and menu bar.
 
 `integration_test/desktop_test.dart` runs the actual native Linux window against
 an already online node, checks sheets and registry settings, captures review

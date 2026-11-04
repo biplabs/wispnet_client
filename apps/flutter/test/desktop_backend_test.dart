@@ -19,7 +19,7 @@ void main() {
             calls.add(call);
             return '/home/receiver/Chosen folder';
           });
-      final backend = DesktopBackend(python: '/missing-python');
+      final backend = DesktopBackend(helper: '/missing-wispnet');
       expect(
         await backend.invoke('pickFolder', {
           'initialPath': '/home/receiver/Downloads',
@@ -37,7 +37,7 @@ void main() {
   test('cancelled folder picker returns no selection', () async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(DesktopBackend.shell, (_) async => null);
-    final backend = DesktopBackend(python: '/missing-python');
+    final backend = DesktopBackend(helper: '/missing-wispnet');
     expect(await backend.invoke('pickFolder'), isEmpty);
     await backend.close();
   });
@@ -52,7 +52,7 @@ void main() {
               message: 'A folder picker is already open.',
             );
           });
-      final backend = DesktopBackend(python: '/missing-python');
+      final backend = DesktopBackend(helper: '/missing-wispnet');
       await expectLater(
         backend.invoke('pickFolder'),
         throwsA(

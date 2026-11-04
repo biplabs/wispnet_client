@@ -11,7 +11,7 @@ import uuid
 
 COMMANDS = r'''
 set -eu
-pacman -Syu --noconfirm --needed python gtk3 libayatana-appindicator xdg-utils diffutils >/tmp/dependencies.log 2>&1
+pacman -Syu --noconfirm --needed gtk3 libayatana-appindicator xdg-utils diffutils >/tmp/dependencies.log 2>&1
 # No systemd manager runs in this container. Record service lifecycle requests.
 cp /usr/bin/systemctl /usr/bin/systemctl.real
 cat > /usr/bin/systemctl <<'SH'
@@ -23,6 +23,10 @@ for arg in "$@"; do
         unit="${!#}"
         printf '/usr/lib/systemd/user/%s\n' "$unit"
         exit 0
+    fi
+    if [ "$arg" = restart ] && [ "${!#}" = wispnet-firewall.service ]; then
+        mkdir -p /run/wispnet-firewall
+        printf '{"version":1,"healthy":true,"uids":[1000],"ports":[],"updated":%s,"error":null}\n' "$(date +%s)" > /run/wispnet-firewall/status.json
     fi
 done
 exit 0
@@ -40,13 +44,18 @@ ldd /opt/wispnet/bin/Wispnet | tee /tmp/ldd.log
 runuser -u aurtest -- wispnet-setup --headless >/tmp/setup.log 2>&1
 runuser -u aurtest -- wispnet host-status --config /home/aurtest/.config/wispnet-node/host.toml > /tmp/before.json
 sha256sum /home/aurtest/.config/wispnet-node/host.toml > /tmp/config.sha
-python3 - <<'INNER'
-import sys,json
-sys.path.insert(0,'/opt/wispnet/scripts')
-from firewall_helper import Firewall
-f=Firewall();f.reconcile({(1000,'ipv4',41088),(1000,'ipv6',41088)})
-open('/etc/wispnet-firewall.json','w').write(json.dumps({'version':1,'uids':[1000]}))
-INNER
+# Exercise the native package firewall administrator. The systemctl stub
+# publishes readiness because this container has no systemd manager.
+wispnet-setup --firewall-uid 1000
+# Seed managed rules as a real running helper would; removal must validate their
+# exact ownership markers and preserve all unrelated INPUT rules.
+for table in iptables ip6tables; do
+    "$table" -N WISPNET-UDP
+    "$table" -A WISPNET-UDP -p udp -m udp --dport 41088 -m comment --comment wispnet-uid-1000 -j ACCEPT
+    "$table" -I INPUT 1 -j WISPNET-UDP
+done
+! command -v python3
+! find /opt/wispnet -name '*.py' -print -quit | grep .
 iptables -A INPUT -p tcp --dport 22 -j ACCEPT
 # Upgrade/reinstall must retain firewall authorization and identity.
 pacman -U --noconfirm /packages/*.pkg.tar.zst >/tmp/upgrade.log 2>&1
