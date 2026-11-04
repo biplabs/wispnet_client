@@ -34,8 +34,8 @@ cargo build -p wispnet-android --target "$native_target" --locked "${cargo_flags
 mkdir -p "apps/flutter/android/app/src/main/jniLibs/$android_abi"
 cp "target/$native_target/$android_profile/libwispnet_android.so" "apps/flutter/android/app/src/main/jniLibs/$android_abi/"
 "$ndk_bin/llvm-strip" --strip-debug "apps/flutter/android/app/src/main/jniLibs/$android_abi/libwispnet_android.so"
-shared_version="$(python3 -c 'import runpy; print(runpy.run_path("apps/node/desktop/wispnet_desktop/version.py")["VERSION"])')"
-shared_code="$(python3 -c 'import sys; a,b,c=map(int,sys.argv[1].split(".")); print(a*1000000+b*1000+c)' "$shared_version")"
+shared_version="$(scripts/build_identity.sh --version)"
+shared_code="$(scripts/build_identity.sh --android-version-code)"
 case "$android_abi" in arm64-v8a) flutter_target=android-arm64 ;; x86_64) flutter_target=android-x64 ;; esac
 case "$android_artifact" in apk) flutter_artifact=apk ;; bundle) flutter_artifact=appbundle ;; esac
 flutter_name="${WISPNET_ANDROID_VERSION_NAME:-$shared_version}"

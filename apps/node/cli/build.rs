@@ -1,41 +1,14 @@
-use std::process::Command;
+#[path = "../../../scripts/build_metadata.rs"]
+mod metadata;
+use std::{env, path::PathBuf};
 fn main() {
-    let root = "../../..";
-    let output = Command::new("python3")
-        .arg("scripts/build_identity.py")
-        .current_dir(root)
-        .output()
+    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("../../..");
+    let version = metadata::identity(&root, &env::var("CARGO_PKG_VERSION").unwrap())
         .expect("shared build identity");
-    assert!(output.status.success(), "shared build identity failed");
-    let version = String::from_utf8(output.stdout).expect("UTF-8 build identity");
-    println!("cargo:rustc-env=WISPNET_VERSION={}", version.trim());
-    let files = Command::new("git")
-        .args([
-            "ls-files",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-            "-z",
-        ])
-        .current_dir(root)
-        .output()
-        .expect("source file list");
-    for path in String::from_utf8(files.stdout)
-        .unwrap()
-        .split('\0')
-        .filter(|p| !p.is_empty())
-    {
-        println!("cargo:rerun-if-changed={root}/{path}");
-    }
-    for path in ["HEAD", "refs/heads/main", "index"] {
-        let output = Command::new("git")
-            .args(["rev-parse", "--git-path", path])
-            .current_dir(root)
-            .output()
-            .unwrap();
-        println!(
-            "cargo:rerun-if-changed={root}/{}",
-            String::from_utf8(output.stdout).unwrap().trim()
-        );
-    }
+    println!("cargo:rustc-env=WISPNET_VERSION={version}");
+    // Recheck Git on every Cargo invocation: mtime watches cannot reliably see
+    // new untracked files, executable-mode changes, or every packed-ref update.
+    // This path is deliberately absent and never written.
+    let check = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("check-source-identity");
+    println!("cargo:rerun-if-changed={}", check.display());
 }

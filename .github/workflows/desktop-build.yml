@@ -72,7 +72,7 @@ jobs:
           EXPECTED_PLATFORM: ${{ matrix.platform }}
         run: |
           target/release/wispnet --help > /dev/null
-          test "$(target/release/wispnet --version)" = "wispnet $(python3 scripts/build_identity.py)"
+          test "$(target/release/wispnet --version)" = "wispnet $(scripts/build_identity.sh)"
           python3 - <<'PY'
           import hashlib, json, os, pathlib, tarfile
           platform = os.environ['EXPECTED_PLATFORM']

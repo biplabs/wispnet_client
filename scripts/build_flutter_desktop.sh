@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version=$(python3 scripts/build_identity.py)
+version=$(scripts/build_identity.sh)
 case "$(uname -s)" in
  Linux) platform=linux; bundle=apps/flutter/build/linux/x64/release/bundle ;;
  Darwin) platform=macos; bundle=apps/flutter/build/macos/Build/Products/Release/Wispnet.app/Contents/MacOS ;;

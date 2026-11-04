@@ -4,8 +4,8 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
     id("dev.flutter.flutter-gradle-plugin")
 }
-val releaseVersion = Regex("""VERSION = "([0-9]+\.[0-9]+\.[0-9]+)"""").find(rootProject.file("../../node/desktop/wispnet_desktop/version.py").readText())!!.groupValues[1]
-val sourceIdentity = providers.exec { workingDir(rootProject.file("../../..")); commandLine("python3", "scripts/build_identity.py") }.standardOutput.asText.get().trim()
+val releaseVersion = providers.exec { workingDir(rootProject.file("../../..")); commandLine("sh", "scripts/build_identity.sh", "--version") }.standardOutput.asText.get().trim()
+val sourceIdentity = providers.exec { workingDir(rootProject.file("../../..")); commandLine("sh", "scripts/build_identity.sh") }.standardOutput.asText.get().trim()
 val nativeAbis = providers.gradleProperty("target-platform").orElse("android-arm64").get().split(",").map {
     when (it) { "android-arm64" -> "arm64-v8a"; "android-x64" -> "x86_64"; else -> error("Supported Android targets: android-arm64, android-x64") }
 }

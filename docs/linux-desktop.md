@@ -217,9 +217,10 @@ remain listed. An updated Android app answers while its process is reachable.
 
 ## Release version
 
-The shared product version is `VERSION` in
-`apps/node/desktop/wispnet_desktop/version.py`. Desktop packaging, the native
-CLI/TUI build, and Android builds read this value. All three interfaces show
+The shared product version is `workspace.package.version` in `Cargo.toml`.
+The Rust helper `scripts/build_identity.sh` supplies version metadata to Cargo,
+Flutter and Android builds without Python. Python remains a development dependency
+for integration tests, packaging and release automation. All three interfaces show
 it with a commit SHA at the bottom right; `wispnet --version` also prints it. Android derives
 its default version code as `major * 1000000 + minor * 1000 + patch`.
 Debug identifiers append `.dirty.<source fingerprint>` for uncommitted changes,
