@@ -134,7 +134,9 @@ async fn platform_offline_stops_http_tcp_and_public_streams_without_mutating_gra
         assert!(control::connect(remote.endpoint(), own, address).await.is_err());
 
         let gateway = tunnel::bind_configured_client(&SecretKey::generate(), Some(&config)).await.unwrap();
-        let gateway_address = gateway.bound_sockets()[0];
+        // A wildcard bind address is not a portable peer connection hint.
+        let mut gateway_address = gateway.bound_sockets()[0];
+        gateway_address.set_ip("127.0.0.1".parse().unwrap());
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let gateway_port = listener.local_addr().unwrap().port();
         let ingress = Ingress::new("wispnet.test".into(), vec![own]).unwrap();
