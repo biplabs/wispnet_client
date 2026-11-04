@@ -1085,9 +1085,6 @@ mod tests {
         )
         .await
         .unwrap();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        drop(client);
-        worker.await.unwrap();
         let session = manager
             .inner
             .sessions
@@ -1097,6 +1094,26 @@ mod tests {
             .next()
             .unwrap()
             .clone();
+        // Input is queued asynchronously. Wait until the command has filled the
+        // attached history before disconnecting, so we exercise backpressure
+        // rather than racing the parser and leaving an idle persistent shell.
+        tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let blocked = {
+                    let state = session.state.lock().unwrap();
+                    state.bytes > HISTORY_BYTES - 8192 && state.cursors.len() == 1
+                };
+                if blocked {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("command did not reach attached output backpressure");
+        drop(client);
+        worker.await.unwrap();
+        assert!(session.state.lock().unwrap().cursors.is_empty());
         tokio::time::timeout(Duration::from_secs(3), async {
             loop {
                 {
