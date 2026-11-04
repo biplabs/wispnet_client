@@ -11,6 +11,7 @@ import platform
 import plistlib
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
 
@@ -158,8 +159,11 @@ def package_dmg(archive, output):
         subprocess.run(["codesign", "--verify", "--deep", "--strict", str(stage / "Wispnet.app")], check=True)
         output.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run([
-            "hdiutil", "create", "-volname", "Wispnet", "-srcfolder", str(stage),
-            "-format", "UDZO", "-ov", str(output),
+            sys.executable, "-m", "dmgbuild",
+            "-s", str(ROOT / "packaging/macos/dmg_settings.py"),
+            "-D", f"app={stage / 'Wispnet.app'}",
+            "-D", f"background={ROOT / 'packaging/macos/background.png'}",
+            "Wispnet", str(output),
         ], check=True)
     output.with_name(output.name + ".sha256").write_text(
         f"{hashlib.sha256(output.read_bytes()).hexdigest()}  {output.name}\n"

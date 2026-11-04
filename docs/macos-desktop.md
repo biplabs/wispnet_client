@@ -109,6 +109,7 @@ action. Choose **Open Wispnet** from the menu to show the desktop window.
 To build the same checkout-independent release archive on a Mac:
 
 ```sh
+python3 -m pip install -r scripts/requirements-macos.txt
 python3 scripts/package_macos.py
 ```
 
@@ -127,3 +128,19 @@ Flutter widgets, desktop adapters, cache validation and owner operations.
 See [Flutter development and native verification](../apps/flutter/README.md).
 Native macOS build, menu-bar, lifecycle and browser verification require a Mac;
 Linux checks do not establish macOS runtime coverage.
+
+### Installer appearance
+
+The disk image opens in a fixed 720 × 440 Finder window, with Wispnet on the left
+and Applications on the right. Its Retina background is exported directly from
+Flutter's `WispSpace` starfield with the desktop theme and bundled Roboto font.
+To regenerate it after changing the desktop background:
+
+```sh
+cd apps/flutter
+../../scripts/flutter.sh test tool/render_dmg_background.dart
+```
+
+The generated 1× and 2× PNGs live in `packaging/macos`; `dmgbuild` combines them
+into the hidden Finder background during packaging. This adds build tooling only,
+not an application runtime dependency.

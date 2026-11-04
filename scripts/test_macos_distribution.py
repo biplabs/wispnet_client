@@ -191,8 +191,11 @@ class MacDistributionTests(unittest.TestCase):
             if command[0] == "codesign":
                 self.assertIn("--verify", command)
                 return subprocess.CompletedProcess(command, 0)
-            self.assertEqual(command[:2], ["hdiutil", "create"])
-            stage = Path(command[command.index("-srcfolder") + 1])
+            self.assertEqual(command[:3], [sys.executable, "-m", "dmgbuild"])
+            app = next(arg.removeprefix("app=") for arg in command if arg.startswith("app="))
+            stage = Path(app).parent
+            self.assertIn(str(package_macos.ROOT / "packaging/macos/dmg_settings.py"), command)
+            self.assertIn(f"background={package_macos.ROOT / 'packaging/macos/background.png'}", command)
             self.assertEqual(sorted(p.name for p in stage.iterdir()), ["Applications", "Wispnet.app"])
             self.assertEqual(os.readlink(stage / "Applications"), "/Applications")
             self.assertTrue((stage / "Wispnet.app/Contents/MacOS/wispnet-node").is_file())

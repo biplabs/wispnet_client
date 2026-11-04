@@ -67,7 +67,9 @@ jobs:
         run: python3 scripts/package_linux.py
       - name: Build macOS desktop distribution
         if: runner.os == 'macOS'
-        run: python3 scripts/package_macos.py
+        run: |
+          python3 -m pip install -r scripts/requirements-macos.txt
+          python3 scripts/package_macos.py
       - name: Verify distribution provenance, checksum and native binary
         env:
           EXPECTED_COMMIT: ${{ github.sha }}
@@ -106,6 +108,8 @@ jobs:
               try:
                   app = mount / "Wispnet.app"
                   subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
+                  assert (mount / ".DS_Store").is_file()
+                  assert (mount / ".background.tiff").is_file()
                   assert (mount / "Applications").readlink() == pathlib.Path("/Applications")
                   assert not list(app.rglob("*.py")), "Unexpected Python runtime payload"
                   info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
