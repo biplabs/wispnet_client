@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import plistlib
 import shutil
 import subprocess
 import tarfile
@@ -40,7 +41,10 @@ def package(binary, app, output):
     version = subprocess.check_output([str(binary), "--version"], text=True).strip()
     if version != f"wispnet {build_identity}":
         raise ValueError("Node build identity does not match this checkout")
-    if (app / "Contents/MacOS/build-identity").read_text().strip() != build_identity:
+    identity_path = app / "Contents/Resources/build-identity"
+    if not identity_path.exists():
+        identity_path = app / "Contents/MacOS/build-identity"
+    if identity_path.read_text().strip() != build_identity:
         raise ValueError("Desktop build identity does not match this checkout")
     subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], check=True)
     revision = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
@@ -69,12 +73,33 @@ def package(binary, app, output):
         (tree / "bin").mkdir()
         shutil.copy2(binary, tree / "bin/wispnet")
         shutil.copytree(app, tree / "Wispnet.app", symlinks=True)
-        native_helper = tree / "Wispnet.app/Contents/MacOS/wispnet"
+        native_helper = tree / "Wispnet.app/Contents/MacOS/wispnet-node"
         shutil.copy2(binary, native_helper)
-        for name in ["bridge.py", "desktop_data.py", "python-path"]:
+        for name in ["bridge.py", "desktop_data.py", "python-path", "icon.png", "build-identity"]:
             (native_helper.parent / name).unlink(missing_ok=True)
         for name in ["wispnet_desktop", "__pycache__"]:
             shutil.rmtree(native_helper.parent / name, ignore_errors=True)
+        info_path = tree / "Wispnet.app/Contents/Info.plist"
+        with info_path.open("rb") as source:
+            info = plistlib.load(source)
+        info.update({
+            "CFBundleIdentifier": "app.wispnet.desktop",
+            "CFBundleName": "Wispnet", "CFBundleDisplayName": "Wispnet",
+            "CFBundleExecutable": "Wispnet", "CFBundleIconFile": "AppIcon",
+            "CFBundleVersion": count,
+            "CFBundleShortVersionString": build_identity.split("+", 1)[0],
+            "WispnetBuildIdentity": build_identity,
+            "LSMinimumSystemVersion": "13.0",
+        })
+        with info_path.open("wb") as destination:
+            plistlib.dump(info, destination)
+        (tree / "Wispnet.app/Contents/Resources/build-identity").write_text(build_identity + "\n")
+        notices = tree / "Wispnet.app/Contents/Resources/Licenses"
+        for name in files:
+            if "LICENSE" in name or "NOTICE" in name:
+                destination = notices / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(tree / name, destination)
         subprocess.run(["codesign", "--force", "--deep", "--sign", "-", str(tree / "Wispnet.app")], check=True)
         hashes = {}
         symlinks = {}
@@ -116,6 +141,32 @@ def package(binary, app, output):
     return output
 
 
+def package_dmg(archive, output):
+    """Reuse the verified distribution app; expose only app + Applications link."""
+    output = output.resolve()
+    with tempfile.TemporaryDirectory(prefix="wispnet-dmg-") as temporary:
+        root = Path(temporary)
+        with tarfile.open(archive) as bundle:
+            bundle.extractall(root / "bundle", filter="data")
+        apps = list((root / "bundle").glob("*/Wispnet.app"))
+        if len(apps) != 1:
+            raise ValueError("Expected one Wispnet.app in the distribution")
+        stage = root / "image"
+        stage.mkdir()
+        shutil.copytree(apps[0], stage / "Wispnet.app", symlinks=True)
+        (stage / "Applications").symlink_to("/Applications", target_is_directory=True)
+        subprocess.run(["codesign", "--verify", "--deep", "--strict", str(stage / "Wispnet.app")], check=True)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([
+            "hdiutil", "create", "-volname", "Wispnet", "-srcfolder", str(stage),
+            "-format", "UDZO", "-ov", str(output),
+        ], check=True)
+    output.with_name(output.name + ".sha256").write_text(
+        f"{hashlib.sha256(output.read_bytes()).hexdigest()}  {output.name}\n"
+    )
+    return output
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, help="Use an explicitly prebuilt native release node")
@@ -129,11 +180,13 @@ def main():
         ], cwd=ROOT, check=True)
     if args.app is None:
         subprocess.run([str(ROOT / "scripts/build_flutter_desktop.sh")], cwd=ROOT, check=True)
-    print(package(
+    archive = package(
         (args.binary or ROOT / "target/release/wispnet").resolve(),
         (args.app or ROOT / "apps/flutter/build/macos/Build/Products/Release/Wispnet.app").resolve(),
         args.output or ROOT / f"target/dist/wispnet-macos-{arch}.tar.gz",
-    ))
+    )
+    print(archive)
+    print(package_dmg(archive, archive.with_name(archive.name.removesuffix(".tar.gz") + ".dmg")))
 
 
 if __name__ == "__main__":

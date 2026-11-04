@@ -172,7 +172,7 @@ fn verify(root: &Path) -> Result<Option<Value>> {
         vec![
             "bin/wispnet",
             "Wispnet.app/Contents/MacOS/Wispnet",
-            "Wispnet.app/Contents/MacOS/wispnet",
+            "Wispnet.app/Contents/MacOS/wispnet-node",
             "scripts/install_macos.sh",
             "apps/node/desktop/icon.png",
         ]
@@ -518,11 +518,202 @@ fn write_plist(path: &Path, value: &plist::Value) -> Result<()> {
     value.to_writer_xml(&mut data)?;
     atomic(path, &data, 0o600)
 }
+/// Set up a drag-installed app without modifying its signed bundle. Explicit
+/// --config bridge sessions (tests and owner automation) never enter this path.
+#[cfg(target_os = "macos")]
+pub fn prepare_macos_desktop() -> std::result::Result<(), String> {
+    prepare_macos_desktop_inner().map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+fn prepare_macos_desktop_inner() -> Result<()> {
+    let executable = std::env::current_exe()?.canonicalize()?;
+    let home = home()?;
+    let Some(app) = installed_app(&executable, &home)? else {
+        // Source-tree executables continue using the explicit source installer.
+        return Ok(());
+    };
+    run(Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(&app)
+        .stdout(Stdio::null()))?;
+    let config = home.join(".config/wispnet-node/host.toml");
+    initialize_macos_host(&home, &config, &executable)?;
+    run(Command::new(&executable)
+        .arg("host-status")
+        .arg("--config")
+        .arg(&config)
+        .stdout(Stdio::null()))?;
+    let node = home.join(".local/libexec/wispnet-node/wispnet");
+    let changed = !node.exists()
+        || Sha256::digest(fs::read(&node)?) != Sha256::digest(fs::read(&executable)?);
+    if changed {
+        copy(&executable, &node)?;
+    }
+    owner_launcher(&node, &home)?;
+    let agents = home.join("Library/LaunchAgents");
+    let logs = home.join("Library/Logs/Wispnet");
+    private_dir(&logs)?;
+    for (label, args, log) in [
+        (
+            "app.wispnet.node",
+            vec![
+                node.to_string_lossy().into_owned(),
+                "agent".into(),
+                "--config".into(),
+                config.to_string_lossy().into_owned(),
+            ],
+            "node.log",
+        ),
+        (
+            "app.wispnet.desktop",
+            vec![
+                app.join("Contents/MacOS/Wispnet")
+                    .to_string_lossy()
+                    .into_owned(),
+                "--background".into(),
+            ],
+            "desktop.log",
+        ),
+    ] {
+        let mut value = plist::Dictionary::new();
+        value.insert("Label".into(), label.into());
+        value.insert(
+            "ProgramArguments".into(),
+            plist::Value::Array(args.into_iter().map(plist::Value::String).collect()),
+        );
+        value.insert("RunAtLoad".into(), true.into());
+        value.insert("ThrottleInterval".into(), 3.into());
+        value.insert("Umask".into(), 63.into());
+        let mut keep = plist::Dictionary::new();
+        keep.insert("SuccessfulExit".into(), false.into());
+        value.insert("KeepAlive".into(), keep.into());
+        if label.ends_with("desktop") {
+            value.insert("LimitLoadToSessionType".into(), "Aqua".into());
+        }
+        for field in ["StandardOutPath", "StandardErrorPath"] {
+            value.insert(
+                field.into(),
+                logs.join(log).to_string_lossy().into_owned().into(),
+            );
+        }
+        let log_path = logs.join(log);
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(&log_path)?;
+        fs::set_permissions(log_path, fs::Permissions::from_mode(0o600))?;
+        write_plist(&agents.join(format!("{label}.plist")), &value.into())?;
+    }
+    let domain = format!("gui/{}", unsafe { libc::getuid() });
+    let service = format!("{domain}/app.wispnet.node");
+    let loaded = Command::new("/bin/launchctl")
+        .args(["print", &service])
+        .output()?
+        .status
+        .success();
+    if changed && loaded {
+        run(Command::new("/bin/launchctl").args(["bootout", &service]))?;
+    }
+    if changed || !loaded {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let result = Command::new("/bin/launchctl")
+                .args(["bootstrap", &domain])
+                .arg(agents.join("app.wispnet.node.plist"))
+                .output()?;
+            if result.status.success() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                return Err(String::from_utf8_lossy(&result.stderr).into_owned().into());
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+    }
+    // The desktop is already running. Its LaunchAgent takes effect next login;
+    // bootstrapping it here would launch a second copy during first-run setup.
+    wait_node(&node, &config)
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn installed_app(executable: &Path, home: &Path) -> Result<Option<PathBuf>> {
+    if executable
+        .file_name()
+        .is_none_or(|name| name != "wispnet-node")
+        || executable
+            .parent()
+            .and_then(Path::file_name)
+            .is_none_or(|name| name != "MacOS")
+        || executable
+            .parent()
+            .and_then(Path::parent)
+            .and_then(Path::file_name)
+            .is_none_or(|name| name != "Contents")
+    {
+        return Ok(None);
+    }
+    let app = executable
+        .parent()
+        .and_then(Path::parent)
+        .and_then(Path::parent)
+        .ok_or("Missing app bundle")?;
+    if app.file_name().is_none_or(|name| name != "Wispnet.app") {
+        return Ok(None);
+    }
+    // Flutter development builds use the source installer and must not register
+    // a login agent pointing into a disposable build directory.
+    if app.ancestors().any(|root| {
+        root.join("Cargo.toml").is_file()
+            && app == root.join("apps/flutter/build/macos/Build/Products/Release/Wispnet.app")
+    }) {
+        return Ok(None);
+    }
+    let parent = app.parent().ok_or("Missing app parent")?;
+    let user_apps = home.join("Applications");
+    if parent != Path::new("/Applications") && parent != user_apps {
+        return Err("Move Wispnet to Applications, eject the disk image, then open Wispnet from Applications.".into());
+    }
+    Ok(Some(app.to_owned()))
+}
+
+fn initialize_macos_host(home: &Path, config: &Path, node: &Path) -> Result<()> {
+    if config.exists() {
+        return Ok(());
+    }
+    let state = home.join(".local/state/wispnet-node");
+    if state.exists() {
+        return Err(
+            "State exists without configuration; recover its configuration before installing"
+                .into(),
+        );
+    }
+    private_dir(config.parent().ok_or("Missing configuration parent")?)?;
+    let name = hostname()?.split('.').next().unwrap_or("device").to_owned();
+    let content = format!(
+        "schema_version=2\ndevice_name={}\nstate_dir={}\nlog_level=\"info\"\n[transport]\nbind_addr=\"0.0.0.0:0\"\nrelay_url=\"https://relay.wispnet.app\"\nrelay_only=false\n",
+        serde_json::to_string(&name)?,
+        serde_json::to_string(&state)?
+    );
+    let mut output = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(config)?;
+    output.write_all(content.as_bytes())?;
+    output.sync_all()?;
+    run(Command::new(node)
+        .arg("host-init")
+        .arg("--config")
+        .arg(config)
+        .stdout(Stdio::null()))
+}
+
 fn install_macos(options: &Options, manifest: Option<&Value>) -> Result<()> {
     let root = &options.root;
     let home = home()?;
     let config = home.join(".config/wispnet-node/host.toml");
-    let state = home.join(".local/state/wispnet-node");
     if !config.exists() && !options.init {
         return Err("No existing host configuration. Use --init to explicitly create this Mac's independent identity.".into());
     }
@@ -566,31 +757,7 @@ fn install_macos(options: &Options, manifest: Option<&Value>) -> Result<()> {
         let metadata = json!({"source_count": count, "version": identity.split('+').next().unwrap_or(""), "build_identity": identity});
         mac_build_metadata(&metadata)?
     };
-    if !config.exists() {
-        if state.exists() {
-            return Err(
-                "State exists without configuration; recover its configuration before installing"
-                    .into(),
-            );
-        }
-        private_dir(config.parent().unwrap())?;
-        let name = hostname()?.split('.').next().unwrap_or("device").to_owned();
-        let content = format!(
-            "schema_version=2\ndevice_name={}\nstate_dir={}\nlog_level=\"info\"\n[transport]\nbind_addr=\"0.0.0.0:0\"\nrelay_url=\"https://relay.wispnet.app\"\nrelay_only=false\n",
-            serde_json::to_string(&name)?,
-            serde_json::to_string(&state)?
-        );
-        let mut output = OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&config)?;
-        output.write_all(content.as_bytes())?;
-        run(Command::new(&node_source)
-            .arg("host-init")
-            .arg("--config")
-            .arg(&config))?;
-    }
+    initialize_macos_host(&home, &config, &node_source)?;
     let api = crate::owner::NodeApi::new(&config)?;
     run(Command::new(&node_source)
         .arg("host-status")
@@ -606,7 +773,7 @@ fn install_macos(options: &Options, manifest: Option<&Value>) -> Result<()> {
         fs::remove_dir_all(&staged)?;
     }
     tree(&app_source, &staged)?;
-    copy(&node_source, &staged.join("Contents/MacOS/wispnet"))?;
+    copy(&node_source, &staged.join("Contents/MacOS/wispnet-node"))?;
     // Prepare and sign the complete replacement before moving the installed app.
     let resources = staged.join("Contents/Resources");
     fs::create_dir_all(&resources)?;
@@ -991,6 +1158,60 @@ fn uninstall(args: &[OsString]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn drag_install_requires_applications_and_never_uses_disk_image_paths() {
+        let home = Path::new("/Users/example");
+        for root in ["/Applications", "/Users/example/Applications"] {
+            let executable = Path::new(root).join("Wispnet.app/Contents/MacOS/wispnet-node");
+            assert_eq!(
+                installed_app(&executable, home).unwrap(),
+                Some(Path::new(root).join("Wispnet.app"))
+            );
+        }
+        for root in ["/Volumes/Wispnet", "/Users/example/Downloads", "/tmp/build"] {
+            let executable = Path::new(root).join("Wispnet.app/Contents/MacOS/wispnet-node");
+            assert!(
+                installed_app(&executable, home)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Move Wispnet")
+            );
+        }
+        assert!(
+            installed_app(Path::new("/tmp/target/debug/wispnet"), home)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn first_launch_preserves_existing_configuration_and_refuses_orphaned_state() {
+        let temporary = tempfile::tempdir().unwrap();
+        let home = temporary.path();
+        let config = home.join(".config/wispnet-node/host.toml");
+        let node = Path::new("/does-not-exist");
+        atomic(
+            &config,
+            b"existing configuration is preserved byte for byte",
+            0o600,
+        )
+        .unwrap();
+        initialize_macos_host(home, &config, node).unwrap();
+        assert_eq!(
+            fs::read(&config).unwrap(),
+            b"existing configuration is preserved byte for byte"
+        );
+        fs::remove_file(&config).unwrap();
+        private_dir(&home.join(".local/state/wispnet-node")).unwrap();
+        assert!(
+            initialize_macos_host(home, &config, node)
+                .unwrap_err()
+                .to_string()
+                .contains("State exists without configuration")
+        );
+        assert!(!config.exists());
+    }
+
     #[test]
     fn mac_metadata_rejects_invalid_versions_before_installation() {
         let valid =

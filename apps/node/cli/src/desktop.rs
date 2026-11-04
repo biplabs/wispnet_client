@@ -869,6 +869,10 @@ pub fn run_args(args: &[OsString]) -> Result<()> {
             return Err("Usage: wispnet desktop-bridge [--config /absolute/path/host.toml]".into());
         }
     };
+    #[cfg(target_os = "macos")]
+    if args.is_empty() {
+        crate::install::prepare_macos_desktop()?;
+    }
     let bridge = Arc::new(Bridge::new(&config)?);
     let (sender, receiver) = mpsc::sync_channel::<Value>(24);
     let receiver = Arc::new(Mutex::new(receiver));

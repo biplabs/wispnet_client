@@ -28,7 +28,8 @@ class DesktopBackend implements WispnetBackend {
 
   Future<Process> _start() async {
     final directory = File(Platform.resolvedExecutable).parent;
-    final bundled = File('${directory.path}/wispnet');
+    final helperName = Platform.isMacOS ? 'wispnet-node' : 'wispnet';
+    final bundled = File('${directory.path}/$helperName');
     final installed = File(
       '${Platform.environment['HOME']}/.local/libexec/wispnet-node/wispnet',
     );

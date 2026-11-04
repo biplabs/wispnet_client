@@ -25,9 +25,9 @@ class MacDistributionTests(unittest.TestCase):
         executable = app / "Contents/MacOS/Wispnet"
         executable.parent.mkdir(parents=True)
         executable.write_bytes(b"inert desktop executable")
-        (executable.parent / "build-identity").write_text("0.1.0+g123456789abc\n")
         resources = app / "Contents/Resources"
         resources.mkdir()
+        (resources / "build-identity").write_text("0.1.0+g123456789abc\n")
         with (app / "Contents/Info.plist").open("wb") as output:
             plistlib.dump({"CFBundleName": "Wispnet"}, output)
         framework = app / "Contents/Frameworks/Example.framework"
@@ -112,7 +112,7 @@ class MacDistributionTests(unittest.TestCase):
 
     def test_app_and_launcher_ship_native_helper_without_python_runtime(self):
         app = self.bundle / "Wispnet.app/Contents/MacOS"
-        self.assertEqual((app / "wispnet").read_bytes(), (self.bundle / "bin/wispnet").read_bytes())
+        self.assertEqual((app / "wispnet-node").read_bytes(), (self.bundle / "bin/wispnet").read_bytes())
         manifest = json.loads((self.bundle / "manifest.json").read_text())
         self.assertNotIn("python", manifest)
         self.assertFalse(any(p.suffix == ".py" for p in self.bundle.rglob("*")))
@@ -157,7 +157,7 @@ class MacDistributionTests(unittest.TestCase):
         self.assert_required_payload("scripts/install_macos.sh")
 
     def test_required_desktop_helper_cannot_be_removed_even_with_modified_manifest(self):
-        self.assert_required_payload("Wispnet.app/Contents/MacOS/wispnet")
+        self.assert_required_payload("Wispnet.app/Contents/MacOS/wispnet-node")
 
     def assert_required_payload(self, name):
         (self.bundle / name).unlink()
@@ -169,6 +169,39 @@ class MacDistributionTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("required", result.stderr.lower())
         self.assertEqual(list(self.home.iterdir()), [])
+
+    def test_drag_install_app_contains_native_runtime_metadata_and_notices(self):
+        app = self.bundle / "Wispnet.app"
+        info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+        self.assertEqual(info["CFBundleIdentifier"], "app.wispnet.desktop")
+        self.assertEqual(info["CFBundleVersion"], "42")
+        self.assertEqual(info["WispnetBuildIdentity"], "0.1.0+g123456789abc")
+        self.assertTrue((app / "Contents/Resources/Licenses/LICENSE").is_file())
+        self.assertTrue((app / "Contents/Resources/Licenses/vendor/noq-proto/LICENSE-APACHE").is_file())
+        self.assertTrue((app / "Contents/MacOS/wispnet-node").is_file())
+        self.assertEqual((app / "Contents/MacOS/Wispnet").read_bytes(), b"inert desktop executable")
+        self.assertFalse(list(app.rglob("*.py")))
+        self.assertFalse(list(app.rglob("python-path")))
+        self.assertEqual(sorted(p.name for p in (app / "Contents/MacOS").iterdir()),
+                         ["Wispnet", "wispnet-node"])
+
+    def test_dmg_contains_only_signed_app_and_applications_shortcut(self):
+        output = self.home / "wispnet.dmg"
+        def run(command, **kwargs):
+            if command[0] == "codesign":
+                self.assertIn("--verify", command)
+                return subprocess.CompletedProcess(command, 0)
+            self.assertEqual(command[:2], ["hdiutil", "create"])
+            stage = Path(command[command.index("-srcfolder") + 1])
+            self.assertEqual(sorted(p.name for p in stage.iterdir()), ["Applications", "Wispnet.app"])
+            self.assertEqual(os.readlink(stage / "Applications"), "/Applications")
+            self.assertTrue((stage / "Wispnet.app/Contents/MacOS/wispnet-node").is_file())
+            output.write_bytes(b"test disk image")
+            return subprocess.CompletedProcess(command, 0)
+        with patch.object(package_macos.subprocess, "run", side_effect=run):
+            self.assertEqual(package_macos.package_dmg(self.archive, output), output.resolve())
+        self.assertEqual(output.with_name(output.name + ".sha256").read_text().split(),
+                         [hashlib.sha256(output.read_bytes()).hexdigest(), output.name])
 
     def test_archive_checksum_manifest_and_licenses(self):
         expected = self.archive.with_name(self.archive.name + ".sha256").read_text().split()[0]

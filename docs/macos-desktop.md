@@ -6,35 +6,54 @@ The private desktop bridge, persistence, node API, catalog cache and owner
 operations are compiled into the Rust executable in `apps/node/cli/src` and
 communicate through private pipes and the owner-only node socket.
 
-## Install a release bundle
+## Install the macOS app
 
-Download the macOS archive and its `.sha256` sidecar from the GitHub Release.
-Use `wispnet-macos-aarch64.tar.gz` for Apple Silicon or
-`wispnet-macos-x86_64.tar.gz` for Intel. The installed app requires macOS 13+. Rust, Flutter and a source checkout are unnecessary
-when installing a release bundle. Python is used only for development/build
-tooling; installation and runtime use native Rust helpers.
+Download `wispnet-macos-aarch64.dmg` for Apple Silicon or
+`wispnet-macos-x86_64.dmg` for Intel from the
+[latest release](https://github.com/biplabs/wispnet_client/releases/latest).
+Open the disk image, drag **Wispnet** to **Applications**, eject the image,
+and open Wispnet from Applications. macOS 13+ is required.
 
-For Apple Silicon, verify and extract into a new directory:
+First launch initializes a new independent host only when no configuration or
+state exists, installs the native node and CLI under `~/.local`, and configures
+per-user login agents. Existing configuration, identity, grants, pins and desktop
+preferences are preserved. State without its configuration is an error, never a
+reason to silently create another identity. The signed application bundle remains
+unchanged. No Python, Rust, Flutter or terminal installation steps are required.
+Quit Wispnet before replacing it with a newer app; open it again to upgrade the
+background node. Applications in `~/Applications` are also supported.
+
+### Homebrew
+
+The release workflow maintains an architecture-specific cask in this repository:
 
 ```sh
-shasum -a 256 --check wispnet-macos-aarch64.tar.gz.sha256
-tar -xzf wispnet-macos-aarch64.tar.gz
-cd wispnet-macos-aarch64
-scripts/install_macos.sh --init
+brew tap biplabs/wispnet https://github.com/biplabs/wispnet_client
+brew install --cask biplabs/wispnet/wispnet
+open -a Wispnet
 ```
 
-Substitute `x86_64` for an Intel Mac. Use `--init` only when creating a new
-independent host. For an upgrade, quit any manually opened Wispnet app and run
-the new bundle's installer without `--init`. The installer verifies every
-payload checksum and framework symlink before changing installed files or
-initializing state. `manifest.json` records the source commit, build identity,
-architecture, minimum macOS version and payload hashes. Obtain the archive and
-checksum from a trusted release source; the checksum does not authenticate its
-publisher.
+If Homebrew asks you to trust this third-party cask, run
+`brew trust --cask biplabs/wispnet/wispnet` and retry installation.
 
-The app is signed ad hoc. Developer ID signing, notarization and App Store
-distribution are not implemented; macOS may require approval to open downloaded
-software.
+Upgrade with `brew update` followed by
+`brew upgrade --cask biplabs/wispnet/wispnet`, then open Wispnet again.
+Each cask pins the release URL and the SHA-256 for both architectures. Homebrew
+also exposes `wispnet` in its bin directory. Uninstalling stops the login agents
+and removes program files; identity, configuration and user data are retained.
+The cask becomes available after the first successful DMG release.
+
+The app is signed ad hoc. Developer ID signing and notarization are not yet
+configured; macOS may require approval to open downloaded software. DMG and
+Homebrew packaging do not replace notarization. Python remains a development,
+test and packaging tool only.
+
+### Advanced archive installation
+
+The release also includes `.tar.gz` bundles and `.sha256` sidecars for scripted
+installation. After verifying and extracting the archive, run
+`scripts/install_macos.sh --init` for a new host or omit `--init` for an upgrade.
+The native installer verifies the manifest before changing installed files.
 
 ## Build and install from source
 
@@ -93,7 +112,9 @@ To build the same checkout-independent release archive on a Mac:
 python3 scripts/package_macos.py
 ```
 
-The native architecture determines the output name under `target/dist/`.
+The native architecture determines the archive and DMG names under `target/dist/`.
+The DMG contains the complete app and an Applications shortcut; license notices
+and build metadata are included inside the signed app.
 The archive contains the release Rust node, complete Flutter app, installer,
 helpers, documentation, license notices and a provenance manifest. Framework
 symlinks are preserved. An explicitly prebuilt node/app can be supplied with

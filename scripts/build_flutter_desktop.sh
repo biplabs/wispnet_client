@@ -11,9 +11,19 @@ esac
 # The native node also provides the private desktop stdio adapter.
 # Rebuild it for this checkout before bundling so UI and adapter stay in sync.
 cargo build --release --locked -p wispnet-cli --bin wispnet
-cp target/release/wispnet "$bundle/wispnet"
-cp apps/node/desktop/icon.png "$bundle/"
-printf '%s\n' "$version" > "$bundle/build-identity"
+helper=wispnet
+if [ "$platform" = macos ]; then helper=wispnet-node; fi
+cp target/release/wispnet "$bundle/$helper"
+assets="$bundle"
+if [ "$platform" = macos ]; then
+ assets="$bundle/../Resources"
+ mkdir -p "$assets"
+ # Contents/MacOS must contain code only. Data signed via extended attributes
+ # loses its detached signature when transported through a tar archive.
+ rm -f "$bundle/icon.png" "$bundle/build-identity"
+fi
+cp apps/node/desktop/icon.png "$assets/"
+printf '%s\n' "$version" > "$assets/build-identity"
 # Flutter's build directory can retain assets from earlier Python releases.
 rm -f "$bundle/bridge.py" "$bundle/desktop_data.py" "$bundle/python-path"
 rm -rf "$bundle/wispnet_desktop" "$bundle/__pycache__"
