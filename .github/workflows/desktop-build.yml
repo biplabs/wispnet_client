@@ -24,9 +24,6 @@ jobs:
           - runner: macos-15
             platform: macos-aarch64
             flutter_platform: macos
-          - runner: macos-15-intel
-            platform: macos-x86_64
-            flutter_platform: macos
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -171,12 +168,8 @@ jobs:
       - name: Verify complete release assets
         working-directory: dist
         run: |
-          for platform in linux-x86_64 macos-aarch64 macos-x86_64; do
-            sha256sum --check "wispnet-$platform.tar.gz.sha256"
-          done
-          for platform in macos-aarch64 macos-x86_64; do
-            sha256sum --check "wispnet-$platform.dmg.sha256"
-          done
+          sha256sum --check wispnet-linux-x86_64.tar.gz.sha256
+          sha256sum --check wispnet-macos-aarch64.dmg.sha256
       - name: Publish development release
         run: |
           # An older build must not replace a newer main build's release.
@@ -189,13 +182,12 @@ jobs:
 
           On macOS, download the DMG, drag Wispnet to Applications, eject the disk image and open Wispnet. First launch sets up the native background node. No Python or terminal setup is required.
 
-          On Linux, download the archive and follow its installation guide. SHA-256 sidecars are provided for every download.
+          On Linux, download the archive and follow its installation guide. SHA-256 checksums are listed below.
 
           | System | Archive |
           | --- | --- |
           | Linux x86_64 (glibc, systemd) | wispnet-linux-x86_64.tar.gz |
           | macOS 13+ Apple Silicon | wispnet-macos-aarch64.dmg |
-          | macOS 13+ Intel | wispnet-macos-x86_64.dmg |
 
           Homebrew:
           \`\`\`sh
@@ -211,12 +203,21 @@ jobs:
           release_title="Development build $(date -u +%Y-%m-%d) (${SOURCE_COMMIT:0:7})"
           python3 scripts/prepare_homebrew.py --dist dist --repository "$GH_REPO" \
             --tag "$release_tag" --output dist/wispnet.rb
+          # Publish only the two end-user downloads. Checksums and the cask are
+          # build inputs/metadata, not additional download choices.
+          {
+            echo
+            echo '### SHA-256'
+            echo '```text'
+            cat dist/wispnet-linux-x86_64.tar.gz.sha256 dist/wispnet-macos-aarch64.dmg.sha256
+            echo '```'
+          } >> "$RUNNER_TEMP/release-notes.md"
           if gh release view "$release_tag" > /dev/null 2>&1; then
-            gh release upload "$release_tag" dist/*.tar.gz dist/*.dmg dist/*.sha256 dist/wispnet.rb --clobber
+            gh release upload "$release_tag" dist/wispnet-linux-x86_64.tar.gz dist/wispnet-macos-aarch64.dmg --clobber
             gh release edit "$release_tag" --title "$release_title" --prerelease=false --latest \
               --notes-file "$RUNNER_TEMP/release-notes.md"
           else
-            gh release create "$release_tag" dist/*.tar.gz dist/*.dmg dist/*.sha256 dist/wispnet.rb --target "$SOURCE_COMMIT" \
+            gh release create "$release_tag" dist/wispnet-linux-x86_64.tar.gz dist/wispnet-macos-aarch64.dmg --target "$SOURCE_COMMIT" \
               --title "$release_title" --latest \
               --notes-file "$RUNNER_TEMP/release-notes.md"
           fi

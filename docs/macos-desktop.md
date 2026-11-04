@@ -8,8 +8,7 @@ communicate through private pipes and the owner-only node socket.
 
 ## Install the macOS app
 
-Download `wispnet-macos-aarch64.dmg` for Apple Silicon or
-`wispnet-macos-x86_64.dmg` for Intel from the
+Download `wispnet-macos-aarch64.dmg` for Apple Silicon from the
 [latest release](https://github.com/biplabs/wispnet_client/releases/latest).
 Open the disk image, drag **Wispnet** to **Applications**, eject the image,
 and open Wispnet from Applications. macOS 13+ is required.
@@ -25,7 +24,7 @@ background node. Applications in `~/Applications` are also supported.
 
 ### Homebrew
 
-The release workflow maintains an architecture-specific cask in this repository:
+The release workflow maintains an Apple Silicon cask in this repository:
 
 ```sh
 brew tap biplabs/wispnet https://github.com/biplabs/wispnet_client
@@ -38,7 +37,7 @@ If Homebrew asks you to trust this third-party cask, run
 
 Upgrade with `brew update` followed by
 `brew upgrade --cask biplabs/wispnet/wispnet`, then open Wispnet again.
-Each cask pins the release URL and the SHA-256 for both architectures. Homebrew
+The cask pins the release URL and SHA-256 for Apple Silicon. Homebrew
 also exposes `wispnet` in its bin directory. Uninstalling stops the login agents
 and removes program files; identity, configuration and user data are retained.
 The cask becomes available after the first successful DMG release.
@@ -50,8 +49,8 @@ test and packaging tool only.
 
 ### Advanced archive installation
 
-The release also includes `.tar.gz` bundles and `.sha256` sidecars for scripted
-installation. After verifying and extracting the archive, run
+For scripted installation, build a `.tar.gz` bundle locally with the packaging
+tool. Releases publish only the Apple Silicon DMG, with its checksum in the notes. After verifying and extracting the archive, run
 `scripts/install_macos.sh --init` for a new host or omit `--init` for an upgrade.
 The native installer verifies the manifest before changing installed files.
 

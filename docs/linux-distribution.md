@@ -42,16 +42,16 @@ explicit prebuilt Flutter executable together with its sibling `lib`/`data` and 
 Every push to `main` automatically runs **Actions → Desktop builds**. You can also
 use **Run workflow** on `main` to rebuild manually. The workflow builds the Rust
 node and Flutter desktop for Linux x86_64 on Ubuntu 24.04, plus native macOS
-Apple Silicon and Intel bundles, with Rust 1.95.0 and Flutter 3.47.7. It checks
+an Apple Silicon DMG, with Rust 1.95.0 and Flutter 3.47.7. It checks
 archive checksums, clean source provenance, platform, desktop and license metadata.
 Project tests remain local through the required pre-push hook.
 
-After all three builds succeed, the workflow updates the rolling
+After both builds succeed, the workflow publishes a new
 [Latest development build](https://github.com/biplabs/wispnet_client/releases/latest)
-with the archives and their `.sha256` sidecars. Download
-`wispnet-linux-x86_64.tar.gz` and its checksum directly from that release, then
-follow the verification and installation steps above. The release notes identify
-the source commit. This is a development snapshot, not a stable v1 release.
+with just two product downloads: the Linux archive and Apple Silicon DMG.
+Download `wispnet-linux-x86_64.tar.gz`, run
+`sha256sum wispnet-linux-x86_64.tar.gz`, and compare the result with the SHA-256
+in the release notes before extracting it. The notes also identify the source commit. This is a development snapshot, not a stable v1 release.
 Failed builds leave the previous release in place. A build superseded by a newer
 `main` commit retains its Actions artifacts without replacing the release.
 

@@ -74,22 +74,6 @@ void main() {
                     Positioned.fill(
                       child: CustomPaint(painter: _InstallArrow()),
                     ),
-                    // Finder uses dark filenames on custom image backgrounds.
-                    // Light label plates keep its real, draggable items legible.
-                    for (final x in [100.0, 476.0])
-                      Positioned(
-                        left: x,
-                        top: 285,
-                        width: 144,
-                        height: 34,
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: const Color(0xffc6d9f0),
-                            borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: const Color(0xffe0eeff)),
-                          ),
-                        ),
-                      ),
                     const Positioned(
                       bottom: 42,
                       left: 0,

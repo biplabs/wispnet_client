@@ -1,15 +1,13 @@
 cask "wispnet" do
-  arch arm: "aarch64", intel: "x86_64"
-
   version "47.937f088"
-  sha256 arm:   "8bca3e00a8927f6c105c7b37839c17436a7dfa6784ac343585de7d591a2e0208",
-         intel: "6dcd721910ce0ad533adbd930497b26b99efc0c17c0f5de939591c2748e731b0"
+  sha256 "8bca3e00a8927f6c105c7b37839c17436a7dfa6784ac343585de7d591a2e0208"
 
-  url "https://github.com/biplabs/wispnet_client/releases/download/development-47-937f088/wispnet-macos-#{arch}.dmg"
+  url "https://github.com/biplabs/wispnet_client/releases/download/development-47-937f088/wispnet-macos-aarch64.dmg"
   name "Wispnet"
   desc "Share and access services across your devices"
   homepage "https://github.com/biplabs/wispnet_client"
 
+  depends_on arch: :arm64
   depends_on macos: :ventura
 
   app "Wispnet.app"

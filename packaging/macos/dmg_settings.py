@@ -13,7 +13,9 @@ show_pathbar = False
 show_sidebar = False
 arrange_by = None
 icon_size = 96
-text_size = 14
+# Finder rejects zero/tiny text sizes and then discards the icon-view styling.
+# Keep only its small native filenames; the background has no label panels.
+text_size = 10
 label_pos = "bottom"
 icon_locations = {"Wispnet.app": (172, 230), "Applications": (548, 230)}
 # Do not set FinderInfo on the signed app: codesign --strict rejects it.

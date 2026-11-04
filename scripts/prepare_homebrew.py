@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate a Homebrew cask pinned to a completed release and both DMG hashes."""
+"""Generate a Homebrew cask pinned to a completed release and the Apple Silicon DMG hash."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -12,27 +12,22 @@ def cask(directory, repository, tag):
     match = re.fullmatch(r"development-([0-9]+)-([0-9a-f]{7})", tag)
     if not match:
         raise ValueError("Expected a versioned development release tag")
-    hashes = {}
-    for arch in ("aarch64", "x86_64"):
-        name = f"wispnet-macos-{arch}.dmg"
-        digest, filename = (directory / (name + ".sha256")).read_text().split()
-        if filename != name or not re.fullmatch(r"[0-9a-f]{64}", digest):
-            raise ValueError(f"Invalid checksum sidecar: {name}")
-        if hashlib.sha256((directory / name).read_bytes()).hexdigest() != digest:
-            raise ValueError(f"Checksum mismatch: {name}")
-        hashes[arch] = digest
+    name = "wispnet-macos-aarch64.dmg"
+    digest, filename = (directory / (name + ".sha256")).read_text().split()
+    if filename != name or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError(f"Invalid checksum sidecar: {name}")
+    if hashlib.sha256((directory / name).read_bytes()).hexdigest() != digest:
+        raise ValueError(f"Checksum mismatch: {name}")
     return f'''cask "wispnet" do
-  arch arm: "aarch64", intel: "x86_64"
-
   version "{match[1]}.{match[2]}"
-  sha256 arm:   "{hashes['aarch64']}",
-         intel: "{hashes['x86_64']}"
+  sha256 "{digest}"
 
-  url "https://github.com/{repository}/releases/download/{tag}/wispnet-macos-#{{arch}}.dmg"
+  url "https://github.com/{repository}/releases/download/{tag}/wispnet-macos-aarch64.dmg"
   name "Wispnet"
   desc "Share and access services across your devices"
   homepage "https://github.com/{repository}"
 
+  depends_on arch: :arm64
   depends_on macos: :ventura
 
   app "Wispnet.app"
