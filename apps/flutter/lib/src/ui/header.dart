@@ -211,8 +211,7 @@ class WispSectionHeading extends StatelessWidget {
             ),
           ),
         ),
-        const SizedBox(width: 12),
-        ...actions,
+        if (actions.isNotEmpty) ...[const SizedBox(width: 12), ...actions],
       ],
     );
     return trailing == null

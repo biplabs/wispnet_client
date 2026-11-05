@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -261,16 +262,21 @@ class _WispHomeState extends State<WispHome>
   Future<void> refresh() async {
     if (refreshing || snapshot.isEmpty || !mounted) return;
     setState(() => refreshing = true);
-    await Future.wait(
-      machines.where((m) => m.data['local'] != true).map((machine) async {
-        try {
-          await backend.invoke('refreshHost', {'host': machine.id});
-          await poll();
-        } catch (error) {
-          notice(message(error));
-        }
-      }),
-    );
+    final remotes = machines.where((m) => m.data['local'] != true).toList();
+    if (remotes.isEmpty) {
+      await poll();
+    } else {
+      await Future.wait(
+        remotes.map((machine) async {
+          try {
+            await backend.invoke('refreshHost', {'host': machine.id});
+            await poll();
+          } catch (error) {
+            notice(message(error));
+          }
+        }),
+      );
+    }
     if (mounted) setState(() => refreshing = false);
   }
 
@@ -576,7 +582,11 @@ class _WispHomeState extends State<WispHome>
     var remotes = machines.where((m) => m.data['local'] != true).toList();
     var pendingRequests = snapshot['pendingRequests'] as int? ?? 0;
     if (remotes.isEmpty) {
-      await pair();
+      if (pendingRequests > 0) {
+        await deviceSettings(section: 'Pairing requests');
+      } else {
+        await pair();
+      }
       return;
     }
     await showWispSheet<void>(
@@ -734,26 +744,6 @@ class _WispHomeState extends State<WispHome>
         await poll();
       }
     }
-  }
-
-  Future<void> shareService() async {
-    await showWispSheet<void>(
-      context,
-      title: 'Share a service',
-      child: ServiceSettings(
-        android: snapshot['desktop'] != true,
-        host: snapshot['peer'] as String? ?? '',
-        backend: backend,
-        servicesOnly: true,
-        createOnly: true,
-        onChanged: () {
-          unawaited(poll());
-          unawaited(refresh());
-        },
-      ),
-    );
-    await poll();
-    await refresh();
   }
 
   Future<void> localServiceSettings(Map<String, dynamic> service) async {
@@ -1160,18 +1150,115 @@ class _WispHomeState extends State<WispHome>
   }
 
   Widget directory() {
-    final local = machines.where((m) => m.data['local'] == true).toList();
-    if (snapshot['desktop'] != true && local.isEmpty) {
-      local.add(
-        Machine(snapshot['peer'] as String? ?? '', {
-          'name': snapshot['name'] ?? 'This device',
-          'local': true,
-          'state': 'available',
-          'catalog': {'services': <Map<String, dynamic>>[]},
-        }),
+    final local = machines
+        .where((m) => m.data['local'] == true && m.services.isNotEmpty)
+        .toList();
+    final remote = machines.where((m) => m.data['local'] != true).toList();
+    final pendingRequests = snapshot['pendingRequests'] as int? ?? 0;
+    final bottomPadding = 24 + MediaQuery.viewPaddingOf(context).bottom;
+    if (local.isEmpty && remote.isEmpty) {
+      return RefreshIndicator(
+        key: const ValueKey('directory'),
+        onRefresh: refresh,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: EdgeInsets.only(bottom: bottomPadding),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: math.max(0.0, constraints.maxHeight - bottomPadding),
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 420),
+                  child: WispPanel(
+                    key: const ValueKey('empty-directory'),
+                    color: const Color(0xd80b1528),
+                    radius: 24,
+                    padding: const EdgeInsets.all(24),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Center(
+                          child: Container(
+                            width: 52,
+                            height: 52,
+                            decoration: BoxDecoration(
+                              color: const Color(0xff132548),
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: const Color(0x664b73c2),
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.hub_outlined,
+                              color: WispColors.cyan,
+                              size: 26,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Ready to connect',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: .3,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text(
+                          'Pair another Wispnet device to open its remote services, or share a local service from Settings.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: WispColors.muted,
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 20),
+                        if (pendingRequests > 0) ...[
+                          OutlinedButton.icon(
+                            onPressed: busy
+                                ? null
+                                : () => deviceSettings(
+                                    section: 'Pairing requests',
+                                  ),
+                            icon: const Icon(
+                              Icons.notifications_active_outlined,
+                              size: 18,
+                            ),
+                            label: Text(
+                              'Review $pendingRequests pairing ${pendingRequests == 1 ? 'request' : 'requests'}',
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        FilledButton.icon(
+                          key: const ValueKey('empty-pair-button'),
+                          onPressed: busy ? null : pair,
+                          icon: const Icon(Icons.qr_code_scanner, size: 20),
+                          label: const Text('Pair a device'),
+                        ),
+                        const SizedBox(height: 6),
+                        TextButton(
+                          key: const ValueKey('empty-local-services-button'),
+                          onPressed: busy
+                              ? null
+                              : () => deviceSettings(servicesOnly: true),
+                          child: const Text('Configure local services ›'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
       );
     }
-    final remote = machines.where((m) => m.data['local'] != true).toList();
     final buttonStyle = OutlinedButton.styleFrom(
       minimumSize: const Size(0, 42),
       shape: const StadiumBorder(),
@@ -1180,9 +1267,7 @@ class _WispHomeState extends State<WispHome>
       key: const ValueKey('directory'),
       onRefresh: refresh,
       child: ListView(
-        padding: EdgeInsets.only(
-          bottom: 24 + MediaQuery.viewPaddingOf(context).bottom,
-        ),
+        padding: EdgeInsets.only(bottom: bottomPadding),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           if (local.isNotEmpty)
@@ -1192,14 +1277,7 @@ class _WispHomeState extends State<WispHome>
                 key: const ValueKey('local-sector'),
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  sectionHeading('LOCAL SERVICES', [
-                    OutlinedButton(
-                      key: const ValueKey('local-share-button'),
-                      onPressed: busy ? null : shareService,
-                      style: buttonStyle,
-                      child: const Text('+ Share'),
-                    ),
-                  ]),
+                  sectionHeading('LOCAL SERVICES', const []),
                   const SizedBox(height: 12),
                   for (final machine in local)
                     directoryCard(machine, local: true),
@@ -1213,30 +1291,64 @@ class _WispHomeState extends State<WispHome>
               sectionHeading(
                 'REMOTE SERVICES',
                 [
-                  OutlinedButton(
-                    onPressed: busy ? null : manage,
-                    style: buttonStyle,
-                    child: Text(
-                      (snapshot['pendingRequests'] as int? ?? 0) > 0
-                          ? 'Manage · ${snapshot['pendingRequests']} requests'
-                          : 'Manage',
+                  if (remote.isNotEmpty || pendingRequests > 0)
+                    OutlinedButton(
+                      onPressed: busy ? null : manage,
+                      style: buttonStyle,
+                      child: Text(
+                        pendingRequests > 0
+                            ? 'Manage · $pendingRequests ${pendingRequests == 1 ? 'request' : 'requests'}'
+                            : 'Manage',
+                      ),
                     ),
-                  ),
                 ],
-                trailing: IconButton(
-                  tooltip: 'Refresh remote services',
-                  onPressed: refreshing ? null : refresh,
-                  icon: refreshing
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh),
-                ),
+                trailing: remote.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Refresh remote services',
+                        onPressed: refreshing ? null : refresh,
+                        icon: refreshing
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.refresh),
+                      ),
               ),
               const SizedBox(height: 12),
-              if (remote.isEmpty) const Text('Pair a device to get started'),
+              if (remote.isEmpty)
+                WispPanel(
+                  key: const ValueKey('empty-remote-card'),
+                  color: const Color(0xd80b1528),
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'No paired devices yet',
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Pair another Wispnet device to open its shared services here.',
+                        style: TextStyle(color: WispColors.muted, height: 1.4),
+                      ),
+                      const SizedBox(height: 14),
+                      FilledButton.icon(
+                        key: const ValueKey('remote-pair-button'),
+                        onPressed: busy ? null : pair,
+                        icon: const Icon(Icons.qr_code_scanner, size: 18),
+                        label: const Text('Pair a device'),
+                      ),
+                    ],
+                  ),
+                ),
               for (final machine in remote)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 14),

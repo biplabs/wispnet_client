@@ -18,13 +18,12 @@ class ServiceSettings extends StatefulWidget {
     required this.onChanged,
     this.initialSection = 'Devices',
     this.servicesOnly = false,
-    this.createOnly = false,
     this.serviceId,
     this.android = false,
     this.host = '',
   });
   final String initialSection;
-  final bool servicesOnly, createOnly, android;
+  final bool servicesOnly, android;
   final String host;
   final String? serviceId;
   final WispnetBackend backend;
@@ -922,8 +921,6 @@ class _ServiceSettingsState extends State<ServiceSettings> {
           Text(error!, style: const TextStyle(color: WispColors.error)),
         if (status == null)
           const LinearProgressIndicator()
-        else if (widget.createOnly)
-          serviceCreationForm()
         else if (section == 'My services') ...[
           if (widget.serviceId == null) ...[
             for (final s in services.where(

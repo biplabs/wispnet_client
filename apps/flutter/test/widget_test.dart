@@ -1777,18 +1777,13 @@ void main() {
     },
   );
   testWidgets(
-    'an empty local sector has no creation shortcut or unconfigured inbox',
+    'an empty local sector stays hidden until a local service is shared',
     (tester) async {
       await mount(tester, FakeBackend(), size: const Size(600, 850));
-      final sector = find.byKey(const ValueKey('local-sector'));
-      expect(
-        find.descendant(of: sector, matching: find.text('Add folder')),
-        findsNothing,
-      );
-      expect(
-        find.descendant(of: sector, matching: find.byType(ReorderTile)),
-        findsNothing,
-      );
+      expect(find.byKey(const ValueKey('local-sector')), findsNothing);
+      expect(find.text('LOCAL SERVICES'), findsNothing);
+      expect(find.text('No local services shared.'), findsNothing);
+      expect(find.text('+ Share'), findsNothing);
       expect(find.byKey(const ValueKey('service-toggle-files')), findsNothing);
       expect(tester.takeException(), isNull);
       await close(tester);
@@ -3381,20 +3376,25 @@ void main() {
     expect(orderedIds(['a', 'b', 'c'], ['b', 'gone', 'b']), ['b', 'a', 'c']);
   });
   testWidgets(
-    'local + Share button and card action icons open matching Wisp sheets',
+    'service sharing goes through Settings gear while card action icons open Wisp sheets',
     (tester) async {
       final backend = _RemoteShareFake();
       await mount(tester, backend, size: const Size(1000, 850));
+      expect(find.byKey(const ValueKey('local-share-button')), findsNothing);
+      expect(find.text('+ Share'), findsNothing);
       expect(find.byTooltip('Browse files in datasets'), findsOneWidget);
       expect(find.byIcon(Icons.folder_open_outlined), findsOneWidget);
 
-      await tester.tap(find.byKey(const ValueKey('local-share-button')));
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Share a service'), findsOneWidget);
+      await tester.tap(find.text('Local services'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('share-service')));
+      await tester.pumpAndSettle();
       expect(find.widgetWithText(Tab, 'Receive files'), findsOneWidget);
       expect(find.widgetWithText(Tab, 'Share files'), findsOneWidget);
       expect(find.widgetWithText(Tab, 'Custom'), findsOneWidget);
-      await tester.tap(find.byTooltip('Close'));
+      await tester.tap(find.byTooltip('Close').last);
       await tester.pumpAndSettle();
 
       await tester.tap(
@@ -3408,6 +3408,118 @@ void main() {
       await close(tester);
     },
   );
+  testWidgets(
+    'fresh install shows centered onboarding card without empty section clutter',
+    (tester) async {
+      final backend = _FreshAndroidFake();
+      await mount(tester, backend, size: const Size(390, 844));
+      expect(find.byKey(const ValueKey('empty-directory')), findsNothing);
+      await tester.tap(find.byTooltip('Enter wisp space'));
+      await tester.pumpAndSettle();
+      await screenshot(tester, 'android-fresh-install');
+      expect(find.byKey(const ValueKey('empty-directory')), findsOneWidget);
+      expect(find.text('Ready to connect'), findsOneWidget);
+      expect(find.text('LOCAL SERVICES'), findsNothing);
+      expect(find.text('REMOTE SERVICES'), findsNothing);
+      expect(find.text('+ Share'), findsNothing);
+      expect(find.text('Manage'), findsNothing);
+      expect(find.byTooltip('Refresh remote services'), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('empty-pair-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Pair a device').hitTestable(), findsOneWidget);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(
+        find.byKey(const ValueKey('empty-local-services-button')),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Local services'), findsOneWidget);
+      expect(find.byKey(const ValueKey('share-service')), findsOneWidget);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await close(tester);
+    },
+  );
+  testWidgets(
+    'remote sector hides refresh when no devices are paired and shows pairing card',
+    (tester) async {
+      final backend = _UnpairedDesktopFake();
+      await mount(tester, backend, size: const Size(1000, 850));
+      await screenshot(tester, 'desktop-unpaired');
+      expect(find.text('LOCAL SERVICES'), findsOneWidget);
+      expect(find.text('+ Share'), findsNothing);
+      expect(find.text('REMOTE SERVICES'), findsOneWidget);
+      expect(find.byTooltip('Refresh remote services'), findsNothing);
+      expect(find.text('Manage'), findsNothing);
+      expect(find.byKey(const ValueKey('empty-remote-card')), findsOneWidget);
+      expect(find.text('No paired devices yet'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('remote-pair-button')));
+      await tester.pumpAndSettle();
+      expect(find.text('Pair a device').hitTestable(), findsOneWidget);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+
+      backend.pending = 1;
+      await tester.drag(
+        find.byKey(const ValueKey('directory')),
+        const Offset(0, 300),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Manage · 1 request'), findsOneWidget);
+      expect(find.byTooltip('Refresh remote services'), findsNothing);
+      await tester.tap(find.text('Manage · 1 request'));
+      await tester.pumpAndSettle();
+      expect(find.text('Device access and pairing'), findsOneWidget);
+      expect(
+        find.widgetWithText(OutlinedButton, 'Approve device'),
+        findsOneWidget,
+      );
+      await close(tester);
+    },
+  );
+}
+
+class _FreshAndroidFake extends AndroidLocalFake {
+  _FreshAndroidFake() {
+    enabled = false;
+    paired = false;
+    (status['host']['services'] as List).clear();
+  }
+
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method, [
+    Map<String, dynamic> arguments = const {},
+  ]) async {
+    final result = await super.invoke(method, arguments);
+    if (method == 'snapshot') {
+      return {...result, 'pendingRequests': 0};
+    }
+    return result;
+  }
+}
+
+class _UnpairedDesktopFake extends DesktopFake {
+  _UnpairedDesktopFake() {
+    paired = false;
+  }
+  int pending = 0;
+
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method, [
+    Map<String, dynamic> arguments = const {},
+  ]) async {
+    final result = await super.invoke(method, arguments);
+    if (method == 'snapshot') {
+      return {...result, 'pendingRequests': pending};
+    }
+    return result;
+  }
 }
 
 class _RemoteShareFake extends DesktopFake {

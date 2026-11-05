@@ -172,7 +172,7 @@ void main() {
       final backend = OwnerFeaturesBackend(android);
       await mountOwner(tester, backend);
       await tester.tap(
-        find.widgetWithText(OutlinedButton, 'Manage · 1 requests'),
+        find.widgetWithText(OutlinedButton, 'Manage · 1 request'),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip('Settings for j-strix'));
@@ -203,7 +203,7 @@ void main() {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
         await tester.tap(
-          find.widgetWithText(OutlinedButton, 'Manage · 1 requests'),
+          find.widgetWithText(OutlinedButton, 'Manage · 1 request'),
         );
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('Settings for j-strix'));
