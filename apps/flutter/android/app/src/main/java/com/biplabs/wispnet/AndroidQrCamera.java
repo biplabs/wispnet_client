@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
 import android.graphics.ImageFormat;
+import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraCaptureSession;
 import android.hardware.camera2.CameraCharacteristics;
 import android.hardware.camera2.CameraDevice;
@@ -15,12 +16,14 @@ import android.media.Image;
 import android.media.ImageReader;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.util.Log;
 import android.util.Size;
 import java.nio.ByteBuffer;
 import java.util.Collections;
 
 /** Native capture only. Flutter owns the QR preview, decoder and navigation. */
 final class AndroidQrCamera implements AutoCloseable {
+ private static final String TAG = "WispnetQrCamera";
  interface Reply { void complete(byte[] image, Exception error); }
  private final Context context;
  private HandlerThread thread;
@@ -69,7 +72,9 @@ final class AndroidQrCamera implements AutoCloseable {
      if (Integer.valueOf(CameraCharacteristics.LENS_FACING_BACK).equals(properties.get(CameraCharacteristics.LENS_FACING))) break;
     }
    }
-   if (selected == null || size == null) throw new Exception("No camera supports QR image capture.");
+   if (selected == null || size == null) {
+    fail("No supported camera capture size. Import a QR image instead."); return;
+   }
    reader = ImageReader.newInstance(size.getWidth(), size.getHeight(), ImageFormat.JPEG, 2);
    reader.setOnImageAvailableListener(source -> imageAvailable(source, current), handler);
    manager.openCamera(selected, new CameraDevice.StateCallback() {
@@ -92,7 +97,10 @@ final class AndroidQrCamera implements AutoCloseable {
          synchronized (AndroidQrCamera.this) { if (current == generation) fail("Camera configuration failed. Try again."); }
         }
        }, handler);
-      } catch (Exception failure) { fail("Cannot open camera capture. Try again."); }
+      } catch (Exception failure) {
+       Log.w(TAG, "Cannot configure QR camera", failure);
+       fail(openFailureMessage(failure));
+      }
      }
     }
     @Override public void onDisconnected(CameraDevice disconnected) {
@@ -101,20 +109,58 @@ final class AndroidQrCamera implements AutoCloseable {
     }
     @Override public void onError(CameraDevice failed, int error) {
      failed.close();
-     synchronized (AndroidQrCamera.this) { if (current == generation) fail("Camera unavailable. Check camera access and try again."); }
+     synchronized (AndroidQrCamera.this) {
+      if (current == generation) {
+       Log.w(TAG, "QR camera error " + error);
+       fail(deviceErrorMessage(error));
+      }
+     }
     }
    }, handler);
-  } catch (Exception failure) { fail("Camera unavailable. Check camera access and try again."); }
+  } catch (Exception failure) {
+   Log.w(TAG, "Cannot open QR camera", failure);
+   fail(openFailureMessage(failure));
+  }
  }
 
  static Size chooseSize(Size[] sizes) {
-  Size selected = null;
+  Size selected = null, fallback = null;
   if (sizes == null) return null;
   for (Size size : sizes) {
-   if (size.getWidth() <= 0 || size.getHeight() <= 0 || size.getWidth() > 1280 || size.getHeight() > 1280) continue;
-   if (selected == null || size.getWidth() * size.getHeight() > selected.getWidth() * selected.getHeight()) selected = size;
+   if (size.getWidth() <= 0 || size.getHeight() <= 0 || size.getWidth() > 1920 || size.getHeight() > 1920) continue;
+   if (size.getWidth() <= 1280 && size.getHeight() <= 1280) {
+    if (selected == null || size.getWidth() * size.getHeight() > selected.getWidth() * selected.getHeight()) selected = size;
+   } else if (fallback == null || size.getWidth() * size.getHeight() < fallback.getWidth() * fallback.getHeight()) fallback = size;
   }
-  return selected;
+  // Media performance class 12+ cameras omit JPEG sizes below 1080p for
+  // modern apps. Keep small captures when offered, otherwise allow 1080p.
+  return selected != null ? selected : fallback;
+ }
+
+ static String deviceErrorMessage(int error) {
+  switch (error) {
+   case CameraDevice.StateCallback.ERROR_CAMERA_IN_USE:
+   case CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE:
+    return "Camera is in use. Close other camera apps and try again.";
+   case CameraDevice.StateCallback.ERROR_CAMERA_DISABLED:
+    return "Camera access is turned off. Enable it in Android settings and try again.";
+   default:
+    return "Camera could not start. Try again or restart your phone.";
+  }
+ }
+
+ static String openFailureMessage(Exception failure) {
+  if (failure instanceof SecurityException) return "Allow camera access or import a QR image.";
+  if (failure instanceof CameraAccessException) {
+   switch (((CameraAccessException)failure).getReason()) {
+    case CameraAccessException.CAMERA_IN_USE:
+    case CameraAccessException.MAX_CAMERAS_IN_USE:
+     return deviceErrorMessage(CameraDevice.StateCallback.ERROR_CAMERA_IN_USE);
+    case CameraAccessException.CAMERA_DISABLED:
+     return deviceErrorMessage(CameraDevice.StateCallback.ERROR_CAMERA_DISABLED);
+   }
+  }
+  return "Camera could not start. Try again or import a QR image.";
  }
 
  synchronized void frame(Reply reply) {

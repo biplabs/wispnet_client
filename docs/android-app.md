@@ -61,6 +61,19 @@ app with `scripts/build_android.sh`, then run
 authorized device. This checks Flutter semantics and real Android handoff;
 the retired Java-view test harness is no longer supported.
 
+The native QR camera checks cover JPEG selection, including cameras whose smallest
+JPEG is 1080p. On a disposable emulator with the app and instrumentation APK
+installed, run the bounds/lifecycle checks without opening a camera:
+
+```sh
+adb -s emulator-5554 shell am instrument -w -e cameraChecks true app.wispnet.android.test/com.biplabs.wispnet.FilesTransferInstrumentation
+```
+
+To opt into real capture and close/reopen checks, pregrant `android.permission.CAMERA`
+and `android.permission.POST_NOTIFICATIONS` to `app.wispnet.android`, then add
+`-e cameraLive true`. This opens the emulator camera and validates two JPEG frames;
+it does not verify optical QR scanning on a physical phone.
+
 See [Flutter development and verification](../apps/flutter/README.md),
 [release checks](android-release.md) and [service discovery](android-service-discovery.md).
 
