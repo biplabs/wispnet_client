@@ -136,24 +136,45 @@ class _QrCameraSheetState extends State<QrCameraSheet>
     children: [
       const Text('Point your camera at a Wispnet pairing QR.'),
       const SizedBox(height: 12),
-      SizedBox(
-        height: (MediaQuery.sizeOf(context).height * .4)
-            .clamp(120, 320)
-            .toDouble(),
-        child: preview == null
-            ? Center(
-                child: scanning
-                    ? const CircularProgressIndicator()
-                    : const Icon(
-                        Icons.videocam_off_outlined,
-                        color: WispColors.muted,
-                      ),
-              )
-            : Image.memory(
-                preview!,
-                gaplessPlayback: true,
-                fit: BoxFit.contain,
+      Center(
+        child: ConstrainedBox(
+          // Leave room for the sheet header and controls on short screens.
+          constraints: BoxConstraints(
+            maxWidth: (MediaQuery.sizeOf(context).height * .86 - 220)
+                .clamp(120, 420)
+                .toDouble(),
+          ),
+          child: AspectRatio(
+            aspectRatio: 1,
+            child: Container(
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                color: WispColors.background,
+                borderRadius: BorderRadius.circular(16),
               ),
+              foregroundDecoration: BoxDecoration(
+                border: Border.all(
+                  color: WispColors.muted.withValues(alpha: .5),
+                ),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: preview == null
+                  ? Center(
+                      child: scanning
+                          ? const CircularProgressIndicator()
+                          : const Icon(
+                              Icons.videocam_off_outlined,
+                              color: WispColors.muted,
+                            ),
+                    )
+                  : Image.memory(
+                      preview!,
+                      gaplessPlayback: true,
+                      fit: BoxFit.cover,
+                    ),
+            ),
+          ),
+        ),
       ),
       if (failure != null) ...[
         const SizedBox(height: 12),
