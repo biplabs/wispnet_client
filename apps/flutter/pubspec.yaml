@@ -4,7 +4,8 @@ description: Shared Wispnet interface, matching the Android application.
 publish_to: none
 version: 0.1.0+1000
 environment:
-  sdk: ^3.13.5
+  sdk: ^3.13.7
+  flutter: '>=3.47.9'
 dependencies:
   desktop_drop: 0.9.2
   zxing2: 0.2.4

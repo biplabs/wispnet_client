@@ -23,7 +23,7 @@ services have a separate section with service management; remote machines and
 their Manage/refresh controls appear under Remote sector; service cards use extra columns
 when the window is wide.
 
-Build prerequisites are Flutter 3.47.7, Clang, CMake, Ninja, pkg-config, GTK 3 and
+Build prerequisites are Flutter 3.47.9, Clang, CMake, Ninja, pkg-config, GTK 3 and
 Ayatana AppIndicator development libraries. Runtime needs GTK/AppIndicator,
 `xdg-open`. The private node/cache/owner-operation adapter is compiled into the
 native Rust executable. WebKitGTK, Tauri, Qt and PySide are not used by the installed Flutter UI.

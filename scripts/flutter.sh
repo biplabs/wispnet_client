@@ -7,6 +7,6 @@ elif command -v flutter >/dev/null 2>&1; then
 elif [[ -x "$HOME/.local/share/flutter/bin/flutter" ]]; then
   exec "$HOME/.local/share/flutter/bin/flutter" "$@"
 else
-  echo 'Flutter 3.47.7 or newer is required. Install the stable SDK and set FLUTTER_ROOT or PATH.' >&2
+  echo 'Flutter 3.47.9 or newer is required. Install the stable SDK and set FLUTTER_ROOT or PATH.' >&2
   exit 1
 fi

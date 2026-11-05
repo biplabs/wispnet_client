@@ -32,7 +32,7 @@ Only native Linux x86_64/glibc is packaged. The target must meet the binary's
 `minimum_glibc` in the manifest and have libgcc and libm. Other architectures,
 musl, macOS and Windows are unsupported by this bundle. All targets need a
 working systemd user manager. GUI targets additionally need GTK 3, Ayatana AppIndicator and `xdg-open`. No Qt/PySide environment is installed.
-Build hosts need Flutter 3.47.7, Clang, CMake, Ninja, the corresponding development packages and `pkg-config`.
+Build hosts need Flutter 3.47.9, Clang, CMake, Ninja, the corresponding development packages and `pkg-config`.
 `--headless` builds a node-only bundle; its installer refuses GUI installation
 before changing installed files. `--desktop-binary /absolute/Wispnet` packages an
 explicit prebuilt Flutter executable together with its sibling `lib`/`data` and helper files. Its provenance must be established separately.
@@ -42,7 +42,7 @@ explicit prebuilt Flutter executable together with its sibling `lib`/`data` and 
 Every push to `main` automatically runs **Actions → Desktop builds**. You can also
 use **Run workflow** on `main` to rebuild manually. The workflow builds the Rust
 node and Flutter desktop for Linux x86_64 on Ubuntu 24.04, plus native macOS
-an Apple Silicon DMG, with Rust 1.95.0 and Flutter 3.47.7. It checks
+an Apple Silicon DMG, with Rust 1.95.0 and Flutter 3.47.9. It checks
 archive checksums, clean source provenance, platform, desktop and license metadata.
 Project tests remain local through the required pre-push hook.
 

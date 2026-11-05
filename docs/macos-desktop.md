@@ -56,7 +56,7 @@ The native installer verifies the manifest before changing installed files.
 
 ## Build and install from source
 
-Build on a Mac with Xcode and its command-line tools, Flutter 3.47.7, the pinned
+Build on a Mac with Xcode and its command-line tools, Flutter 3.47.9, the pinned
 Rust toolchain and Git. Python 3.11+ is needed for development tests and packaging.
 The installed app requires macOS 13+.
 

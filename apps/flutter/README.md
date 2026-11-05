@@ -55,7 +55,7 @@ and runtime validation on a Mac. Windows/iOS node adapters are not implemented.
 
 ## Build and run
 
-Use Flutter **3.47.7** (Dart 3.13.5), Android SDK 36, and the existing Rust/Android
+Use Flutter **3.47.9** (Dart 3.13.7), Android SDK 36, and the existing Rust/Android
 prerequisites. `scripts/flutter.sh` resolves `FLUTTER_ROOT`, `PATH`, then
 `~/.local/share/flutter`. The Flutter runner uses the SDK's NDK; the Rust library
 continues to use the existing NDK 27 build and 16 KB alignment flags.
