@@ -405,7 +405,14 @@ impl Request {
     }
 }
 pub(crate) async fn headers(stream: &mut (impl AsyncRead + Unpin)) -> Result<Vec<u8>, ()> {
-    tokio::time::timeout(Duration::from_secs(10), async {
+    headers_with_timeout(stream, Duration::from_secs(10)).await
+}
+
+async fn headers_with_timeout(
+    stream: &mut (impl AsyncRead + Unpin),
+    timeout: Duration,
+) -> Result<Vec<u8>, ()> {
+    tokio::time::timeout(timeout, async {
         let mut bytes = Vec::new();
         while bytes.len() < 32768 {
             bytes.push(stream.read_u8().await.map_err(|_| ())?);
@@ -693,7 +700,7 @@ impl Route {
             if copied != length {
                 return Err(());
             }
-            let mut head = match headers(&mut service)
+            let mut head = match headers_with_timeout(&mut service, Duration::from_secs(60))
                 .await
                 .and_then(|bytes| http::response(&bytes, &request, &origin, binding, websocket))
             {
@@ -1376,6 +1383,9 @@ mod tests {
                 let text = String::from_utf8_lossy(&incoming).to_ascii_lowercase();
                 assert!(!text.contains("x-wispnet-access"));
                 assert!(text.contains("authorization: bearer backend-key"));
+                if text.starts_with("post /slow ") {
+                    tokio::time::sleep(Duration::from_secs(13)).await;
+                }
                 if text.starts_with("get /hold ") {
                     s.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n1\r\nx\r\n")
                         .await
@@ -1436,7 +1446,7 @@ mod tests {
             .unwrap();
 
         let auth = "Authorization: Bearer backend-key\r\n";
-        assert!(raw(&url, "POST", "/", auth).await.ends_with("ok"));
+        assert!(raw(&url, "POST", "/slow", auth).await.ends_with("ok"));
         assert!(
             raw(
                 &url,
