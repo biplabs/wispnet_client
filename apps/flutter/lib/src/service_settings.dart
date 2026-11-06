@@ -648,15 +648,6 @@ class _ServiceSettingsState extends State<ServiceSettings> {
     await load();
   }
 
-  Future<void> invite() async {
-    await showWispSheet<void>(
-      context,
-      title: 'Pair this device',
-      child: _Invitation(backend: widget.backend),
-    );
-    await load();
-  }
-
   Future<void> combined(String op) async {
     final response = await widget.backend.invoke('ownerData', {
       'op': 'targets',
@@ -899,8 +890,6 @@ class _ServiceSettingsState extends State<ServiceSettings> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (!widget.servicesOnly) ...[
-          action('Pair this device', () => run(invite)),
-          const SizedBox(height: 12),
           DropdownButton<String>(
             isExpanded: true,
             value: section,
@@ -1041,7 +1030,6 @@ class _ServiceSettingsState extends State<ServiceSettings> {
                 ],
               ),
             ),
-          SelectableText('This device’s ID\n${status!['host']['host']}'),
         ] else if (section == 'Pairing requests') ...[
           if (requests.isEmpty) const Text('No pending requests.'),
           for (final i in requests)
@@ -1189,6 +1177,15 @@ class _ActionFormState extends State<_ActionForm> {
     ),
   );
 }
+
+Future<void> showPairingInvitation(
+  BuildContext context,
+  WispnetBackend backend,
+) => showWispSheet<void>(
+  context,
+  title: 'Pair this device',
+  child: _Invitation(backend: backend),
+);
 
 class _Invitation extends StatefulWidget {
   const _Invitation({required this.backend});

@@ -578,19 +578,11 @@ class _WispHomeState extends State<WispHome>
     pairingSheet = false;
   }
 
-  Future<void> manage() async {
+  Future<void> manage({BuildContext? from}) async {
     var remotes = machines.where((m) => m.data['local'] != true).toList();
     var pendingRequests = snapshot['pendingRequests'] as int? ?? 0;
-    if (remotes.isEmpty) {
-      if (pendingRequests > 0) {
-        await deviceSettings(section: 'Pairing requests');
-      } else {
-        await pair();
-      }
-      return;
-    }
     await showWispSheet<void>(
-      context,
+      from ?? context,
       title: 'Paired devices',
       child: StatefulBuilder(
         builder: (pageContext, update) {
@@ -634,7 +626,9 @@ class _WispHomeState extends State<WispHome>
                       ),
                     );
                   },
-                  child: Text('Review $pendingRequests pairing requests'),
+                  child: Text(
+                    'Review $pendingRequests pairing ${pendingRequests == 1 ? 'request' : 'requests'}',
+                  ),
                 ),
               for (final machine in remotes)
                 Padding(
@@ -670,6 +664,17 @@ class _WispHomeState extends State<WispHome>
                   openPage(pair(from: pageContext));
                 },
                 child: const Text('+ Pair another device'),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton(
+                onPressed: () => openPage(
+                  showPairingInvitation(pageContext, backend),
+                ),
+                child: const Text('Pair this device'),
+              ),
+              TextButton(
+                onPressed: () => openPage(deviceSettings(from: pageContext)),
+                child: const Text('Device access'),
               ),
               const SizedBox(height: 16),
               SelectableText(
@@ -709,7 +714,7 @@ class _WispHomeState extends State<WispHome>
   }) async {
     await showWispSheet<void>(
       from ?? context,
-      title: servicesOnly ? 'Local services' : 'Device access and pairing',
+      title: servicesOnly ? 'Local services' : 'Device access',
       child: ServiceSettings(
         android: snapshot['desktop'] != true,
         host: snapshot['peer'] as String? ?? '',
@@ -778,7 +783,7 @@ class _WispHomeState extends State<WispHome>
             deviceSettings(servicesOnly: true, from: pageContext);
           },
           onOwnerTools: () {
-            deviceSettings(section: 'Devices', from: pageContext);
+            manage(from: pageContext);
           },
           onSaved: () {
             if (!pageContext.mounted || !wispPageIsCurrent(pageContext)) return;

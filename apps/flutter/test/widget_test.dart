@@ -1861,17 +1861,14 @@ void main() {
     'pairing remains available in Settings and opens its QR and code',
     (tester) async {
       final backend = DesktopFake();
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: wispTheme(),
-          home: Scaffold(
-            body: SingleChildScrollView(
-              child: ServiceSettings(backend: backend, onChanged: () {}),
-            ),
-          ),
-        ),
-      );
+      await mount(tester, backend);
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
+      final devices = find.text('Device access and pairing');
+      await tester.ensureVisible(devices);
+      await tester.tap(devices);
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Pair this device'));
       expect(find.text('Pair this device'), findsOneWidget);
       await tester.tap(find.text('Pair this device'));
       await tester.pumpAndSettle();
@@ -2478,7 +2475,7 @@ void main() {
           .first,
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Review 1 pairing requests'));
+    await tester.tap(find.text('Review 1 pairing request'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Approve device'));
     await tester.pumpAndSettle();
@@ -3159,7 +3156,7 @@ void main() {
               .first,
         );
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Review 1 pairing requests'));
+        await tester.tap(find.text('Review 1 pairing request'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Approve device'));
         await tester.pumpAndSettle();
@@ -3473,7 +3470,9 @@ void main() {
       expect(find.byTooltip('Refresh remote services'), findsNothing);
       await tester.tap(find.text('Manage · 1 request'));
       await tester.pumpAndSettle();
-      expect(find.text('Device access and pairing'), findsOneWidget);
+      expect(find.text('Paired devices'), findsOneWidget);
+      await tester.tap(find.text('Review 1 pairing request'));
+      await tester.pumpAndSettle();
       expect(
         find.widgetWithText(OutlinedButton, 'Approve device'),
         findsOneWidget,

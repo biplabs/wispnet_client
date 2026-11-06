@@ -186,10 +186,11 @@ void main() {
         await tester.tap(find.text('Device access and pairing'));
         await waitFor(find.text('Pair this device'));
         expect(
-          find.text('Device access and pairing').hitTestable(),
+          find.text('Paired devices').hitTestable(),
           findsOneWidget,
         );
         expect(find.text('Device and browser settings'), findsNothing);
+        await tester.ensureVisible(find.text('Pair this device'));
         await tester.tap(find.text('Pair this device'));
         await waitFor(find.byKey(const ValueKey('pairing-qr')));
         expect(find.text('Copy pairing code'), findsNothing);

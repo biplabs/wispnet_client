@@ -54,7 +54,7 @@ void main() {
       await tester.tap(find.text('Device access and pairing'));
       await waitFor(find.text('Pair this device'));
       expect(
-        find.text('Device access and pairing').hitTestable(),
+        find.text('Paired devices').hitTestable(),
         findsOneWidget,
       );
       expect(find.text('Device and browser settings'), findsNothing);

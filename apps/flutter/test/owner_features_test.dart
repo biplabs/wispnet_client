@@ -102,18 +102,12 @@ void main() {
         await mountOwner(tester, backend);
         await openOwnerTools(tester);
         expect(
-          find.text('Device access and pairing').hitTestable(),
+          find.text('Paired devices').hitTestable(),
           findsOneWidget,
         );
         expect(find.text('Device and browser settings'), findsNothing);
-        final selector = tester.widget<DropdownButton<String>>(
-          find.byType(DropdownButton<String>),
-        );
-        expect(selector.items!.map((item) => item.value), [
-          'Devices',
-          'Pairing requests',
-          'Owner operations',
-        ]);
+        expect(find.text('+ Pair another device'), findsOneWidget);
+        expect(find.text('Pair this device'), findsOneWidget);
         await tapHeader(tester, 'Back');
         expect(find.text('Settings'), findsOneWidget);
         expect(find.widgetWithText(TextField, 'Device name'), findsOneWidget);
@@ -145,10 +139,10 @@ void main() {
         await openInvitation(tester);
         await tapHeader(tester, 'Back');
         expect(
-          find.text('Device access and pairing').hitTestable(),
+          find.text('Paired devices').hitTestable(),
           findsOneWidget,
         );
-        expect(find.text('Existing device'), findsOneWidget);
+        expect(find.text('j-strix · aaaaaaaa').hitTestable(), findsOneWidget);
         await tapHeader(tester, 'Back');
         expect(find.text('Settings'), findsOneWidget);
         final tools = find.text('Device access and pairing');
@@ -242,9 +236,7 @@ void main() {
         final backend = DeferredOwnerBackend(android);
         await mountOwner(tester, backend);
         await openOwnerTools(tester);
-        await tester.tap(find.byType(DropdownButton<String>));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Pairing requests (1)').last);
+        await tester.tap(find.text('Review 1 pairing request'));
         await tester.pumpAndSettle();
         final approve = find.widgetWithText(OutlinedButton, 'Approve device');
         await tester.ensureVisible(approve);
@@ -277,25 +269,22 @@ void main() {
     );
 
     testWidgets(
-      '$platform owner entry opens the shared Devices page and issues a pairing QR',
+      '$platform paired devices links to local access and issues a pairing QR',
       (tester) async {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
         await openOwnerTools(tester);
+        final access = find.widgetWithText(TextButton, 'Device access');
+        await tester.ensureVisible(access);
+        await tester.tap(access);
+        await tester.pumpAndSettle();
         final settings = tester.widget<ServiceSettings>(
           find.byType(ServiceSettings),
         );
         expect(settings.android, android);
         expect(settings.initialSection, 'Devices');
-        expect(
-          tester
-              .widget<DropdownButton<String>>(
-                find.byType(DropdownButton<String>),
-              )
-              .value,
-          'Devices',
-        );
         expect(find.text('Existing device'), findsOneWidget);
+        await tapHeader(tester, 'Back');
         await tester.ensureVisible(find.text('Pair this device'));
         await tester.tap(find.text('Pair this device'));
         await tester.pumpAndSettle();
@@ -419,9 +408,7 @@ void main() {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
         await openOwnerTools(tester);
-        await tester.tap(find.byType(DropdownButton<String>));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Pairing requests (1)').last);
+        await tester.tap(find.text('Review 1 pairing request'));
         await tester.pumpAndSettle();
         final approve = find.widgetWithText(OutlinedButton, 'Approve device');
         await tester.ensureVisible(approve);
