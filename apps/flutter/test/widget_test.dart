@@ -13,7 +13,7 @@ import 'package:wispnet/src/cards.dart';
 import 'package:wispnet/src/file_shares.dart';
 import 'package:wispnet/src/space.dart';
 import 'package:wispnet/src/service_settings.dart';
-import 'package:wispnet/src/sheets.dart' show ConnectionDiagnostics;
+import 'package:wispnet/src/sheets.dart' show ConnectionDiagnostics, PairingForm;
 import 'package:wispnet/src/terminal_sheet.dart';
 import 'package:wispnet/ui.dart';
 
@@ -599,6 +599,15 @@ Future<void> close(WidgetTester tester) async {
   await tester.pump();
 }
 
+Future<void> openPairedDevices(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Settings'));
+  await tester.pumpAndSettle();
+  final entry = find.text('Device access and pairing');
+  await tester.ensureVisible(entry);
+  await tester.tap(entry);
+  await tester.pumpAndSettle();
+}
+
 Future<void> screenshot(WidgetTester tester, String name) async {
   final folder = Platform.environment['WISPNET_SCREENSHOTS'];
   if (folder == null) return;
@@ -1043,15 +1052,7 @@ void main() {
     tester,
   ) async {
     await mount(tester, DesktopFake(), size: const Size(1000, 850));
-    await tester.tap(
-      find
-          .descendant(
-            of: find.byKey(const ValueKey('remote-sector')),
-            matching: find.byType(OutlinedButton),
-          )
-          .first,
-    );
-    await tester.pumpAndSettle();
+    await openPairedDevices(tester);
     await tester.tap(find.text('+ Pair another device'));
     await tester.pumpAndSettle();
     expect(find.text('Pair a device'), findsOneWidget);
@@ -1061,10 +1062,14 @@ void main() {
     expect(find.text('Scan with camera'), findsNothing);
     await tester.tap(find.text('Pairing Code'));
     await tester.pumpAndSettle();
-    expect(find.byType(TextField), findsOneWidget);
+    final code = find.descendant(
+      of: find.byType(PairingForm),
+      matching: find.byType(TextField),
+    );
+    expect(code, findsOneWidget);
     final pair = find.widgetWithText(FilledButton, 'Pair');
     expect(tester.widget<FilledButton>(pair).onPressed, isNull);
-    await tester.enterText(find.byType(TextField), 'wispnet1:samplecode');
+    await tester.enterText(code, 'wispnet1:samplecode');
     await tester.pump();
     expect(tester.widget<FilledButton>(pair).onPressed, isNotNull);
     await close(tester);
@@ -1738,26 +1743,14 @@ void main() {
     await close(tester);
   });
   testWidgets(
-    'remote Manage button follows its title at phone and desktop widths',
+    'remote services show refresh without Manage at phone and desktop widths',
     (tester) async {
-      for (final width in [390.0, 1000.0]) {
-        await mount(tester, DesktopFake(), size: Size(width, 850));
-        for (final section in ['remote']) {
-          final container = find.byKey(ValueKey('$section-sector'));
-          final title = find.descendant(
-            of: container,
-            matching: find.text(
-              section == 'local' ? 'LOCAL SERVICES' : 'REMOTE SERVICES',
-            ),
-          );
-          final manage = find
-              .descendant(of: container, matching: find.byType(OutlinedButton))
-              .first;
-          expect(
-            tester.getRect(manage).left,
-            closeTo(tester.getRect(title).right + 12, .01),
-          );
-        }
+      for (final (backend, width) in [
+        (AndroidLocalFake(), 390.0),
+        (DesktopFake(), 1000.0),
+      ]) {
+        await mount(tester, backend, size: Size(width, 850));
+        expect(find.textContaining('Manage'), findsNothing);
         final remote = find.byKey(const ValueKey('remote-sector'));
         final refresh = find.ancestor(
           of: find.byTooltip('Refresh remote services'),
@@ -1847,10 +1840,7 @@ void main() {
     expect(find.text('Enable public access'), findsNothing);
     await tester.tap(find.byTooltip('Close').last);
     await tester.pumpAndSettle();
-    await tester.tap(
-      find.descendant(of: remote, matching: find.byType(OutlinedButton)).first,
-    );
-    await tester.pumpAndSettle();
+    await openPairedDevices(tester);
     expect(find.text('Paired devices'), findsOneWidget);
     expect(find.text('hibreak · dddddddd'), findsOneWidget);
     expect(find.text('j-strix · aaaaaaaa'), findsNWidgets(2));
@@ -1862,12 +1852,7 @@ void main() {
     (tester) async {
       final backend = DesktopFake();
       await mount(tester, backend);
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-      final devices = find.text('Device access and pairing');
-      await tester.ensureVisible(devices);
-      await tester.tap(devices);
-      await tester.pumpAndSettle();
+      await openPairedDevices(tester);
       await tester.ensureVisible(find.text('Pair this device'));
       expect(find.text('Pair this device'), findsOneWidget);
       await tester.tap(find.text('Pair this device'));
@@ -2466,15 +2451,7 @@ void main() {
   ) async {
     final backend = DesktopFake();
     await mount(tester, backend, size: const Size(1000, 850));
-    await tester.tap(
-      find
-          .descendant(
-            of: find.byKey(const ValueKey('remote-sector')),
-            matching: find.byType(OutlinedButton),
-          )
-          .first,
-    );
-    await tester.pumpAndSettle();
+    await openPairedDevices(tester);
     await tester.tap(find.text('Review 1 pairing request'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Approve device'));
@@ -2523,7 +2500,7 @@ void main() {
     },
   );
   testWidgets(
-    'Android shell dock expands and minimizes without a close button',
+    'Android shell dock expands and minimizes and confirms session termination',
     (tester) async {
       final backend = FakeBackend(
         shellService: true,
@@ -2559,12 +2536,40 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('desktop-shell-close')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const ValueKey('shell-dock-close')), findsNothing);
       expect(
         backend.calls.where((c) => c.$1 == 'nativeTerminalClose'),
         isEmpty,
       );
       expect(find.byKey(const ValueKey('shell-dock')), findsOneWidget);
+
+      final closeDock = find.byKey(const ValueKey('shell-dock-close'));
+      await tester.tap(closeDock);
+      await tester.pumpAndSettle();
+      expect(find.text('Close terminal?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(closeDock, findsOneWidget);
+      expect(
+        backend.calls.where((c) => c.$1 == 'nativeTerminalClose'),
+        isEmpty,
+      );
+
+      await tester.tap(closeDock);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('confirm-close-shell')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('shell-dock')), findsNothing);
+      expect(
+        backend.calls.where((c) => c.$1 == 'nativeTerminalClose').single.$2,
+        {
+          'host': peer,
+          'host_name': 'j-strix',
+          'service': 'shell',
+          'incarnation': incarnation,
+          'session': 'main',
+          'terminate': true,
+        },
+      );
       await close(tester);
     },
   );
@@ -2696,11 +2701,6 @@ void main() {
       expect(find.text('j-strix · main'), findsOneWidget);
       expect(find.text('j-desktop · tab-2'), findsOneWidget);
 
-      expect(find.byKey(const ValueKey('shell-dock-close')), findsNothing);
-      expect(
-        find.byKey(ValueKey('shell-dock-close-$secondHost')),
-        findsNothing,
-      );
       await tester.tap(find.byKey(ValueKey('shell-dock-expand-$secondHost')));
       await tester.pumpAndSettle();
       expect(find.byType(DesktopTerminalSheet), findsOneWidget);
@@ -2712,6 +2712,24 @@ void main() {
       );
       expect(find.text('j-strix · main'), findsOneWidget);
       expect(find.text('j-desktop · tab-2'), findsOneWidget);
+
+      await tester.tap(find.byKey(ValueKey('shell-dock-close-$secondHost')));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('terminal sessions on j-desktop'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('confirm-close-shell')));
+      await tester.pumpAndSettle();
+      expect(find.text('j-strix · main'), findsOneWidget);
+      expect(find.text('j-desktop · tab-2'), findsNothing);
+      final closed = backend.calls
+          .where((c) => c.$1 == 'nativeTerminalClose')
+          .single
+          .$2;
+      expect(closed['host'], secondHost);
+      expect(closed['session'], 'tab-2');
+      expect(closed['terminate'], isTrue);
       await close(tester);
     },
   );
@@ -3147,15 +3165,7 @@ void main() {
           exports: configured ? {'training': '/srv/training'} : {},
         );
         await mount(tester, backend, size: const Size(1000, 1000));
-        await tester.tap(
-          find
-              .descendant(
-                of: find.byKey(const ValueKey('remote-sector')),
-                matching: find.byType(OutlinedButton),
-              )
-              .first,
-        );
-        await tester.pumpAndSettle();
+        await openPairedDevices(tester);
         await tester.tap(find.text('Review 1 pairing request'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('Approve device'));
@@ -3466,10 +3476,9 @@ void main() {
         const Offset(0, 300),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Manage · 1 request'), findsOneWidget);
+      expect(find.textContaining('Manage'), findsNothing);
       expect(find.byTooltip('Refresh remote services'), findsNothing);
-      await tester.tap(find.text('Manage · 1 request'));
-      await tester.pumpAndSettle();
+      await openPairedDevices(tester);
       expect(find.text('Paired devices'), findsOneWidget);
       await tester.tap(find.text('Review 1 pairing request'));
       await tester.pumpAndSettle();

@@ -78,8 +78,8 @@ void main() {
         await mouse.addPointer(location: Offset.zero);
         await mouse.moveTo(tester.getCenter(find.byType(OnlineButton)));
         await capture('hover-online');
-        await mouse.moveTo(tester.getCenter(find.text('Manage').first));
-        await capture('hover-manage');
+        await mouse.moveTo(tester.getCenter(find.byTooltip('Settings')));
+        await capture('hover-settings');
         final serviceTile = find
             .descendant(
               of: find.byKey(const ValueKey('local-sector')),
@@ -114,14 +114,11 @@ void main() {
         await tester.pump(const Duration(milliseconds: 500));
         await tester.tap(find.byTooltip('Close').last);
         await tester.pump(const Duration(milliseconds: 500));
-        await tester.tap(
-          find
-              .descendant(
-                of: find.byKey(const ValueKey('remote-sector')),
-                matching: find.byType(OutlinedButton),
-              )
-              .first,
-        );
+        await tester.tap(find.byTooltip('Settings'));
+        final deviceAccess = find.text('Device access and pairing');
+        await waitFor(deviceAccess);
+        await tester.ensureVisible(deviceAccess);
+        await tester.tap(deviceAccess);
         await waitFor(find.text('+ Pair another device'));
         await tester.tap(find.text('+ Pair another device'));
         await waitFor(find.text('Pair a device'));
@@ -182,8 +179,8 @@ void main() {
         expect(find.byKey(const ValueKey('share-service')), findsOneWidget);
         await tester.tap(find.byTooltip('Back').last);
         await tester.pump(const Duration(milliseconds: 500));
-        await tester.ensureVisible(find.text('Device access and pairing'));
-        await tester.tap(find.text('Device access and pairing'));
+        await tester.ensureVisible(deviceAccess);
+        await tester.tap(deviceAccess);
         await waitFor(find.text('Pair this device'));
         expect(
           find.text('Paired devices').hitTestable(),

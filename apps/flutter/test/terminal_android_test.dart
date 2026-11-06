@@ -233,7 +233,7 @@ void main() {
           isEmpty,
         );
         expect(find.byKey(const ValueKey('shell-dock')), findsOneWidget);
-        expect(find.byKey(const ValueKey('shell-dock-close')), findsNothing);
+        expect(find.byKey(const ValueKey('shell-dock-close')), findsOneWidget);
         final layout =
             backend.calls
                     .where((call) => call.$1 == 'saveTerminalLayout')

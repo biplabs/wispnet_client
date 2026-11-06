@@ -88,10 +88,14 @@ void main() {
             '/data/data/app.wispnet.android/cache/flutter-device-offline-control.png',
           ).writeAsBytes(bytes!.buffer.asUint8List());
           image.dispose();
-          await tester.tap(find.text('Manage'));
+          await tester.tap(find.byTooltip('Settings'));
+          final deviceAccess = find.text('Device access and pairing');
+          await waitFor(deviceAccess);
+          await tester.ensureVisible(deviceAccess);
+          await tester.tap(deviceAccess);
           await waitFor(find.text('Paired devices'));
           await capture('flutter-device-machines');
-          await tester.tap(find.byTooltip('Close'));
+          await tester.tap(find.byTooltip('Close').last);
           await tester.pump(const Duration(milliseconds: 500));
         } else {
           await tester.tap(find.byTooltip('Establish your wisp network'));

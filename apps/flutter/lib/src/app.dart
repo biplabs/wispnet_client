@@ -839,12 +839,6 @@ class _WispHomeState extends State<WispHome>
     ].join(' · ');
   }
 
-  Widget sectionHeading(
-    String title,
-    List<Widget> actions, {
-    Widget? trailing,
-  }) => WispSectionHeading(title: title, actions: actions, trailing: trailing);
-
   Widget directoryCard(Machine machine, {bool local = false}) => MachineCard(
     machine: machine,
     showHeader: !local,
@@ -1264,10 +1258,6 @@ class _WispHomeState extends State<WispHome>
         ),
       );
     }
-    final buttonStyle = OutlinedButton.styleFrom(
-      minimumSize: const Size(0, 42),
-      shape: const StadiumBorder(),
-    );
     return RefreshIndicator(
       key: const ValueKey('directory'),
       onRefresh: refresh,
@@ -1282,7 +1272,7 @@ class _WispHomeState extends State<WispHome>
                 key: const ValueKey('local-sector'),
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  sectionHeading('LOCAL SERVICES', const []),
+                  const WispSectionHeading(title: 'LOCAL SERVICES'),
                   const SizedBox(height: 12),
                   for (final machine in local)
                     directoryCard(machine, local: true),
@@ -1293,20 +1283,8 @@ class _WispHomeState extends State<WispHome>
             key: const ValueKey('remote-sector'),
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              sectionHeading(
-                'REMOTE SERVICES',
-                [
-                  if (remote.isNotEmpty || pendingRequests > 0)
-                    OutlinedButton(
-                      onPressed: busy ? null : manage,
-                      style: buttonStyle,
-                      child: Text(
-                        pendingRequests > 0
-                            ? 'Manage · $pendingRequests ${pendingRequests == 1 ? 'request' : 'requests'}'
-                            : 'Manage',
-                      ),
-                    ),
-                ],
+              WispSectionHeading(
+                title: 'REMOTE SERVICES',
                 trailing: remote.isEmpty
                     ? null
                     : IconButton(
@@ -1434,7 +1412,6 @@ class _WispHomeState extends State<WispHome>
       ),
       expandLabel: 'Expand shell $title',
       closeLabel: 'Close shell',
-      showClose: snapshot['desktop'] == true,
       onExpand: busy ? null : () => expandShell(shell),
       onClose: busy ? null : () => confirmCloseShell(shell),
     );

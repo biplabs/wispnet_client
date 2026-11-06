@@ -73,15 +73,6 @@ Future<void> mountOwner(
   size: backend.android ? const Size(390, 844) : const Size(1000, 850),
 );
 
-Future<void> openOwnerTools(WidgetTester tester) async {
-  await tester.tap(find.byTooltip('Settings'));
-  await tester.pumpAndSettle();
-  final tools = find.text('Device access and pairing');
-  await tester.ensureVisible(tools);
-  await tester.tap(tools);
-  await tester.pumpAndSettle();
-}
-
 void main() {
   setUpAll(() async {
     await (FontLoader('Roboto')
@@ -100,7 +91,7 @@ void main() {
       (tester) async {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
-        await openOwnerTools(tester);
+        await fixture.openPairedDevices(tester);
         expect(
           find.text('Paired devices').hitTestable(),
           findsOneWidget,
@@ -135,7 +126,7 @@ void main() {
       (tester) async {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
-        await openOwnerTools(tester);
+        await fixture.openPairedDevices(tester);
         await openInvitation(tester);
         await tapHeader(tester, 'Back');
         expect(
@@ -160,15 +151,12 @@ void main() {
       },
     );
 
-    testWidgets('$platform paired-machine pages preserve Manage for Back', (
+    testWidgets('$platform paired-machine pages go Back to Paired devices', (
       tester,
     ) async {
       final backend = OwnerFeaturesBackend(android);
       await mountOwner(tester, backend);
-      await tester.tap(
-        find.widgetWithText(OutlinedButton, 'Manage · 1 request'),
-      );
-      await tester.pumpAndSettle();
+      await fixture.openPairedDevices(tester);
       await tester.tap(find.byTooltip('Settings for j-strix'));
       await tester.pumpAndSettle();
       expect(find.textContaining('Device name\nj-strix'), findsOneWidget);
@@ -192,14 +180,11 @@ void main() {
     });
 
     testWidgets(
-      '$platform removing a machine refreshes the preserved Manage page',
+      '$platform removing a machine refreshes the Paired devices list',
       (tester) async {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
-        await tester.tap(
-          find.widgetWithText(OutlinedButton, 'Manage · 1 request'),
-        );
-        await tester.pumpAndSettle();
+        await fixture.openPairedDevices(tester);
         await tester.tap(find.byTooltip('Settings for j-strix'));
         await tester.pumpAndSettle();
         await tester.tap(find.widgetWithText(OutlinedButton, 'Remove'));
@@ -235,7 +220,7 @@ void main() {
       (tester) async {
         final backend = DeferredOwnerBackend(android);
         await mountOwner(tester, backend);
-        await openOwnerTools(tester);
+        await fixture.openPairedDevices(tester);
         await tester.tap(find.text('Review 1 pairing request'));
         await tester.pumpAndSettle();
         final approve = find.widgetWithText(OutlinedButton, 'Approve device');
@@ -273,7 +258,7 @@ void main() {
       (tester) async {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
-        await openOwnerTools(tester);
+        await fixture.openPairedDevices(tester);
         final access = find.widgetWithText(TextButton, 'Device access');
         await tester.ensureVisible(access);
         await tester.tap(access);
@@ -407,7 +392,7 @@ void main() {
       (tester) async {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
-        await openOwnerTools(tester);
+        await fixture.openPairedDevices(tester);
         await tester.tap(find.text('Review 1 pairing request'));
         await tester.pumpAndSettle();
         final approve = find.widgetWithText(OutlinedButton, 'Approve device');

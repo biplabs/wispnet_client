@@ -71,13 +71,11 @@ class WispDockBar extends StatelessWidget {
     required this.closeLabel,
     this.expandKey,
     this.closeKey,
-    this.showClose = true,
   });
   final String title, expandLabel, closeLabel;
   final Color statusColor;
   final VoidCallback? onExpand, onClose;
   final Key? expandKey, closeKey;
-  final bool showClose;
 
   @override
   Widget build(BuildContext context) => WispPanel(
@@ -124,15 +122,13 @@ class WispDockBar extends StatelessWidget {
             ),
           ),
         ),
-        if (showClose) ...[
-          const SizedBox(width: 4),
-          IconButton(
-            key: closeKey,
-            tooltip: closeLabel,
-            onPressed: onClose,
-            icon: const Icon(Icons.close, size: 18, color: WispColors.muted),
-          ),
-        ],
+        const SizedBox(width: 4),
+        IconButton(
+          key: closeKey,
+          tooltip: closeLabel,
+          onPressed: onClose,
+          icon: const Icon(Icons.close, size: 18, color: WispColors.muted),
+        ),
       ],
     ),
   );
