@@ -111,7 +111,7 @@ the queue when the panel closes or the UI is recreated. Going offline cancels
 its active and queued transfers. After a network-process restart, select the
 original documents again to recover their durable resume state.
 
-To receive on Android, open **Settings → Local services → Add folder**, choose
+To receive on Android, open **Settings → Services → Local services → Add folder**, choose
 **Receive files**, pick a writable folder, and select the devices allowed to
 send into this inbox. Repeat for additional inboxes. The gear edits only that
 inbox's folder and permissions. Pairing never grants receiving permission.
@@ -214,7 +214,7 @@ files. Preparation, verification and Android publication have their own status;
 they do not advertise a transfer speed. Stalled or unavailable updates clear the
 estimate. Older local nodes without the fresh-byte counter cannot show reliable
 folder speeds, but updated local clients measure downloads from older sources.
-On Android, open **Settings → Local services → Add folder → Share files**. Choose a
+On Android, open **Settings → Services → Local services → Add folder → Share files**. Choose a
 folder with Android's system picker, then select the paired devices allowed to
 browse and download that share. Each share has its own device list; receiving
 files through the inbox is configured independently. Wispnet persists only the

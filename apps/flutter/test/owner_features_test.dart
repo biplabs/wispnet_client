@@ -92,20 +92,17 @@ void main() {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
         await fixture.openPairedDevices(tester);
-        expect(
-          find.text('Paired devices').hitTestable(),
-          findsOneWidget,
-        );
+        expect(find.text('Paired devices').hitTestable(), findsOneWidget);
         expect(find.text('Device and browser settings'), findsNothing);
         expect(find.text('+ Pair another device'), findsOneWidget);
         expect(find.text('Pair this device'), findsOneWidget);
         await tapHeader(tester, 'Back');
         expect(find.text('Settings'), findsOneWidget);
-        expect(find.widgetWithText(TextField, 'Device name'), findsOneWidget);
-        expect(find.widgetWithText(TextField, 'Wispnet port'), findsOneWidget);
+        expect(find.text('Device'), findsOneWidget);
+        expect(find.text('Services'), findsOneWidget);
         expect(find.byType(ServiceSettings), findsNothing);
 
-        final tools = find.text('Device access and pairing');
+        final tools = find.text('Access & pairing');
         await tester.ensureVisible(tools);
         await tester.tap(tools);
         await tester.pumpAndSettle();
@@ -129,14 +126,11 @@ void main() {
         await fixture.openPairedDevices(tester);
         await openInvitation(tester);
         await tapHeader(tester, 'Back');
-        expect(
-          find.text('Paired devices').hitTestable(),
-          findsOneWidget,
-        );
+        expect(find.text('Paired devices').hitTestable(), findsOneWidget);
         expect(find.text('j-strix · aaaaaaaa').hitTestable(), findsOneWidget);
         await tapHeader(tester, 'Back');
         expect(find.text('Settings'), findsOneWidget);
-        final tools = find.text('Device access and pairing');
+        final tools = find.text('Access & pairing');
         await tester.ensureVisible(tools);
         await tester.tap(tools);
         await tester.pumpAndSettle();
@@ -293,7 +287,9 @@ void main() {
           await mountOwner(tester, backend);
           await tester.tap(find.byTooltip('Settings'));
           await tester.pumpAndSettle();
-          await tester.ensureVisible(find.text('Local services'));
+          await tester.ensureVisible(find.text('Services'));
+          await tester.tap(find.text('Services'));
+          await tester.pumpAndSettle();
           await tester.tap(find.text('Local services'));
           await tester.pumpAndSettle();
           await tester.ensureVisible(

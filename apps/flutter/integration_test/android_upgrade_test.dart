@@ -61,6 +61,11 @@ void main() {
         }
         expect(find.textContaining(before['name'] as String), findsWidgets);
         await tester.tap(find.byTooltip('Settings'));
+        await waitFor(find.text('Device'));
+        await tester.tap(find.text('Device'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Advanced'));
+        await tester.pumpAndSettle();
         await waitFor(find.widgetWithText(TextField, 'Wispnet port'));
         await waitFor(find.widgetWithText(FilledButton, 'Save'));
         expect(
@@ -89,7 +94,7 @@ void main() {
           ).writeAsBytes(bytes!.buffer.asUint8List());
           image.dispose();
           await tester.tap(find.byTooltip('Settings'));
-          final deviceAccess = find.text('Device access and pairing');
+          final deviceAccess = find.text('Access & pairing');
           await waitFor(deviceAccess);
           await tester.ensureVisible(deviceAccess);
           await tester.tap(deviceAccess);

@@ -60,8 +60,10 @@ void main() {
         );
         await waitFor(find.byTooltip('Settings'));
         await tester.tap(find.byTooltip('Settings'));
-        await waitFor(find.text('Connection diagnostics'));
-        await tester.ensureVisible(find.text('Connection diagnostics'));
+        await waitFor(find.text('Connections'));
+        await tester.ensureVisible(find.text('Connections'));
+        await tester.tap(find.text('Connections'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Connection diagnostics'));
         await waitFor(find.byType(ConnectionDiagnostics));
         await waitFor(find.text('Run again'), seconds: 80);

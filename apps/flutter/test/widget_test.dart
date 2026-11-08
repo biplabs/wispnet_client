@@ -13,7 +13,8 @@ import 'package:wispnet/src/cards.dart';
 import 'package:wispnet/src/file_shares.dart';
 import 'package:wispnet/src/space.dart';
 import 'package:wispnet/src/service_settings.dart';
-import 'package:wispnet/src/sheets.dart' show ConnectionDiagnostics, PairingForm;
+import 'package:wispnet/src/sheets.dart'
+    show ConnectionDiagnostics, PairingForm;
 import 'package:wispnet/src/terminal_sheet.dart';
 import 'package:wispnet/ui.dart';
 
@@ -602,7 +603,7 @@ Future<void> close(WidgetTester tester) async {
 Future<void> openPairedDevices(WidgetTester tester) async {
   await tester.tap(find.byTooltip('Settings'));
   await tester.pumpAndSettle();
-  final entry = find.text('Device access and pairing');
+  final entry = find.text('Access & pairing');
   await tester.ensureVisible(entry);
   await tester.tap(entry);
   await tester.pumpAndSettle();
@@ -1156,58 +1157,57 @@ void main() {
     await close(tester);
     debugDefaultTargetPlatformOverride = null;
   });
-  testWidgets('Diagnostic below Save opens a page and runs automatically', (
-    tester,
-  ) async {
-    final backend = FakeBackend();
-    await mount(tester, backend);
-    expect(find.text('Connection diagnostics'), findsNothing);
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-    expect(find.byTooltip('Connection diagnostics'), findsNothing);
-    expect(
-      tester.getTopLeft(find.text('Connection diagnostics')).dy,
-      greaterThan(tester.getBottomLeft(find.text('Save').last).dy),
-    );
-    await tester.tap(find.text('Connection diagnostics'));
-    await tester.pumpAndSettle();
-    expect(
-      find.widgetWithText(AppBar, 'Connection diagnostics'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('Network type: Cellular'), findsOneWidget);
-    expect(find.textContaining('relay → relay'), findsOneWidget);
-    expect(find.textContaining('Device relay connections'), findsOneWidget);
-    expect(
-      find.textContaining('✓ https://relay.wispnet.app/ · preferred'),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('✓ https://usw1-1.relay.n0.iroh.link/'),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('Device discovery observations'),
-      findsOneWidget,
-    );
-    expect(find.textContaining('• ? UDP response IPv4'), findsOneWidget);
-    expect(
-      find.textContaining('Automatic router mapping status unavailable'),
-      findsOneWidget,
-    );
-    expect(
-      backend.calls
-          .where((c) => c.$1 == 'connectionDiagnostics')
-          .single
-          .$2['host'],
-      peer,
-    );
-    expect(backend.calls.where((c) => c.$1 == 'saveSettings'), isEmpty);
-    await tester.pageBack();
-    await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'Device name'), findsOneWidget);
-    expect(find.text('Save').last, findsOneWidget);
-  });
+  testWidgets(
+    'Connections opens diagnostics and preserves settings navigation',
+    (tester) async {
+      final backend = FakeBackend();
+      await mount(tester, backend);
+      expect(find.text('Connection diagnostics'), findsNothing);
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Connection diagnostics'), findsNothing);
+      await tester.tap(find.text('Connections'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Connection diagnostics'));
+      await tester.pumpAndSettle();
+      expect(
+        find.widgetWithText(AppBar, 'Connection diagnostics'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Network type: Cellular'), findsOneWidget);
+      expect(find.textContaining('relay → relay'), findsOneWidget);
+      expect(find.textContaining('Device relay connections'), findsOneWidget);
+      expect(
+        find.textContaining('✓ https://relay.wispnet.app/ · preferred'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('✓ https://usw1-1.relay.n0.iroh.link/'),
+        findsOneWidget,
+      );
+      expect(
+        find.textContaining('Device discovery observations'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('• ? UDP response IPv4'), findsOneWidget);
+      expect(
+        find.textContaining('Automatic router mapping status unavailable'),
+        findsOneWidget,
+      );
+      expect(
+        backend.calls
+            .where((c) => c.$1 == 'connectionDiagnostics')
+            .single
+            .$2['host'],
+        peer,
+      );
+      expect(backend.calls.where((c) => c.$1 == 'saveSettings'), isEmpty);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text('MCP (Model Context Protocol)'), findsOneWidget);
+      expect(find.byTooltip('Back to settings'), findsOneWidget);
+    },
+  );
   testWidgets('both ends distinguish refreshed discovery from cached reports', (
     tester,
   ) async {
@@ -1275,6 +1275,8 @@ void main() {
     await mount(tester, backend);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Connections'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Connection diagnostics'));
     await tester.pumpAndSettle();
     final text = tester
@@ -1308,6 +1310,8 @@ void main() {
       await mount(tester, backend, size: const Size(1000, 850));
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Connections'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Connection diagnostics'));
       await tester.pumpAndSettle();
       expect(find.byType(ConnectionDiagnostics), findsOneWidget);
@@ -1336,6 +1340,8 @@ void main() {
     await mount(tester, backend, size: const Size(1000, 850));
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Connections'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Connection diagnostics'));
     await tester.pumpAndSettle();
     expect(
@@ -1351,10 +1357,78 @@ void main() {
     );
     await close(tester);
   });
+  for (final scale in [1.0, 2.0]) {
+    testWidgets(
+      'settings sections fit a phone at $scale and retain unsaved device edits',
+      (tester) async {
+        await mount(
+          tester,
+          FakeBackend(),
+          size: const Size(360, 780),
+          scale: scale,
+        );
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        for (final title in [
+          'Device',
+          'Services',
+          'Access & pairing',
+          'Connections',
+        ]) {
+          await tester.ensureVisible(find.text(title));
+          expect(find.text(title).hitTestable(), findsOneWidget);
+        }
+        await tester.ensureVisible(find.text('Device'));
+        await screenshot(tester, 'phone-settings-sections-$scale');
+        expect(find.byType(TextField), findsNothing);
+        await tester.ensureVisible(find.text('Device'));
+        await tester.tap(find.text('Device'));
+        await tester.pumpAndSettle();
+        expect(
+          find.widgetWithText(TextField, 'Wispnet port').hitTestable(),
+          findsNothing,
+        );
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Device name'),
+          'my-phone',
+        );
+        await tester.ensureVisible(find.byTooltip('Back to settings'));
+        await tester.tap(find.byTooltip('Back to settings'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Connections'));
+        await tester.tap(find.text('Connections'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('settings-mcp-copy')), findsOneWidget);
+        expect(
+          find.byKey(const ValueKey('settings-registry-copy')),
+          findsNothing,
+        );
+        await tester.ensureVisible(find.byTooltip('Back to settings'));
+        await tester.tap(find.byTooltip('Back to settings'));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.text('Device'));
+        await tester.tap(find.text('Device'));
+        await tester.pumpAndSettle();
+        expect(
+          tester
+              .widget<TextField>(find.widgetWithText(TextField, 'Device name'))
+              .controller!
+              .text,
+          'my-phone',
+        );
+        expect(tester.takeException(), isNull);
+        await close(tester);
+      },
+    );
+  }
   testWidgets('settings validate before changing native state', (tester) async {
     final backend = FakeBackend();
     await mount(tester, backend);
     await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Device'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Advanced'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'Wispnet port'),
@@ -1486,8 +1560,9 @@ void main() {
     await mount(tester, backend, size: const Size(1000, 850));
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'Device name'), findsOneWidget);
-    expect(find.widgetWithText(TextField, 'Wispnet port'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Device name'), findsNothing);
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
     expect(find.text('Device and browser settings'), findsNothing);
     expect(find.byType(TabBar), findsNothing);
     expect(find.byType(DropdownButton<String>), findsNothing);
@@ -1501,6 +1576,10 @@ void main() {
       backend.calls.where((call) => call.$1 == 'launch').single.$2['url'],
       'http://wispnet.localhost:18400/registry',
     );
+    await tester.tap(find.byTooltip('Back to settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connections'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(
       find.byKey(const ValueKey('settings-mcp-address')),
     );
@@ -1514,6 +1593,12 @@ void main() {
       ('settings-registry-copy', 'http://wispnet.localhost:18400/registry'),
       ('settings-mcp-copy', 'http://wispnet.localhost:18400/mcp'),
     ]) {
+      await tester.tap(find.byTooltip('Back to settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.text(key.contains('registry') ? 'Services' : 'Connections'),
+      );
+      await tester.pumpAndSettle();
       final button = find.byKey(ValueKey(key));
       await tester.ensureVisible(button);
       await tester.tap(button);
@@ -1532,6 +1617,8 @@ void main() {
     final backend = DesktopFake();
     await mount(tester, backend, size: const Size(1000, 850));
     await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
@@ -1724,6 +1811,8 @@ void main() {
     await mount(tester, backend, size: const Size(1000, 850));
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('share-service')));
@@ -1829,6 +1918,8 @@ void main() {
     );
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('share-service')), findsOneWidget);
@@ -1889,6 +1980,8 @@ void main() {
     expect(tester.widget<WispToggle>(web).value, isFalse);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
     final files = find.descendant(
@@ -1939,6 +2032,8 @@ void main() {
     expect(find.text('Off'), findsWidgets);
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
     await tester.tap(
@@ -1962,6 +2057,8 @@ void main() {
       final backend = AndroidLocalFake();
       await mount(tester, backend, size: const Size(600, 850));
       await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Services'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Local services'));
       await tester.pumpAndSettle();
@@ -2908,6 +3005,8 @@ void main() {
     await mount(tester, backend, size: const Size(1000, 850));
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
     expect(find.text('Enable Shell'), findsNothing);
@@ -3339,6 +3438,8 @@ void main() {
     await mount(tester, backend, size: const Size(1000, 850));
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Services'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('share-service')));
@@ -3393,6 +3494,8 @@ void main() {
       expect(find.byIcon(Icons.folder_open_outlined), findsOneWidget);
 
       await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Services'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Local services'));
       await tester.pumpAndSettle();

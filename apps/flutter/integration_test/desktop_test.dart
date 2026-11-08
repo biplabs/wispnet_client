@@ -115,7 +115,7 @@ void main() {
         await tester.tap(find.byTooltip('Close').last);
         await tester.pump(const Duration(milliseconds: 500));
         await tester.tap(find.byTooltip('Settings'));
-        final deviceAccess = find.text('Device access and pairing');
+        final deviceAccess = find.text('Access & pairing');
         await waitFor(deviceAccess);
         await tester.ensureVisible(deviceAccess);
         await tester.tap(deviceAccess);
@@ -132,8 +132,10 @@ void main() {
         await tester.tap(find.byTooltip('Close').last);
         await tester.pump(const Duration(milliseconds: 500));
         await tester.tap(find.byTooltip('Settings'));
-        await waitFor(find.text('Local services'));
-        await tester.ensureVisible(find.text('Local services'));
+        await waitFor(find.text('Services'));
+        await tester.ensureVisible(find.text('Services'));
+        await tester.tap(find.text('Services'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Local services'));
         await waitFor(find.byKey(const ValueKey('share-service')));
         expect(find.text('Pair this device'), findsNothing);
@@ -182,10 +184,7 @@ void main() {
         await tester.ensureVisible(deviceAccess);
         await tester.tap(deviceAccess);
         await waitFor(find.text('Pair this device'));
-        expect(
-          find.text('Paired devices').hitTestable(),
-          findsOneWidget,
-        );
+        expect(find.text('Paired devices').hitTestable(), findsOneWidget);
         expect(find.text('Device and browser settings'), findsNothing);
         await tester.ensureVisible(find.text('Pair this device'));
         await tester.tap(find.text('Pair this device'));
@@ -209,7 +208,7 @@ void main() {
         expect(find.text('Pair this device'), findsOneWidget);
         await tester.tap(find.byTooltip('Back').last);
         await tester.pump(const Duration(milliseconds: 500));
-        expect(find.widgetWithText(TextField, 'Wispnet port'), findsOneWidget);
+        expect(find.text('Device'), findsOneWidget);
         await tester.tap(find.byTooltip('Close').last);
         await tester.pump(const Duration(milliseconds: 500));
         final serviceSettings = find.descendant(
@@ -318,6 +317,11 @@ void main() {
           await tester.pump(const Duration(milliseconds: 100));
         }
         await tester.tap(find.byTooltip('Settings'));
+        await waitFor(find.text('Device'));
+        await tester.tap(find.text('Device'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Advanced'));
+        await tester.pumpAndSettle();
         await waitFor(find.widgetWithText(TextField, 'Wispnet port'));
         expect(find.text('Device and browser settings'), findsNothing);
         expect(find.byTooltip('Close'), findsOneWidget);
@@ -331,6 +335,10 @@ void main() {
           isNotEmpty,
         );
         await capture('browser-settings');
+        await tester.tap(find.byTooltip('Back to settings'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Services'));
+        await tester.pumpAndSettle();
         await tester.ensureVisible(
           find.byKey(const ValueKey('settings-address')),
         );

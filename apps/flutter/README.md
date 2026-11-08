@@ -41,7 +41,10 @@ The remaining differences are native platform integrations, not alternate pages:
 
 Local service switches pause serving and close active connections while keeping
 folder settings and grants for re-enabling. Switch state survives a node restart.
-In Settings, Device access and pairing opens the Paired devices popup.
+Settings groups controls into Device, Services, Access & pairing, and Connections.
+Device contains the name and an Advanced port setting; Services contains local
+services and the registry URL; Connections contains MCP setup and diagnostics.
+Access & pairing opens the Paired devices popup.
 Pair another device scans or imports a pairing QR or accepts a pairing code.
 Pair this device displays this device’s invitation. Device access opens the
 local approval list, pairing requests, and owner-operation history.

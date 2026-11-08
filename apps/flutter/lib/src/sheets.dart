@@ -861,6 +861,7 @@ class _SettingsFormState extends State<SettingsForm> {
   bool loading = true, saving = false, opening = false;
   String? error;
   String address = '';
+  String? section;
   @override
   void initState() {
     super.initState();
@@ -970,85 +971,156 @@ class _SettingsFormState extends State<SettingsForm> {
     }
   }
 
+  void showSection(String? value) {
+    FocusManager.instance.primaryFocus?.unfocus();
+    Scrollable.maybeOf(context)?.position.jumpTo(0);
+    setState(() => section = value);
+  }
+
+  Widget sectionRow(
+    IconData icon,
+    String title,
+    String description,
+    VoidCallback onTap,
+  ) => Material(
+    type: MaterialType.transparency,
+    child: ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: Icon(icon),
+      title: Text(title),
+      subtitle: Text(description),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: onTap,
+    ),
+  );
+
   @override
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      TextField(
-        controller: name,
-        enabled: !saving,
-        decoration: const InputDecoration(labelText: 'Device name'),
-      ),
-      const SizedBox(height: 12),
-      const Text(
-        'One HTTP port for all Wispnet services and the registry on this device. Default: 7842. Changes reconnect active sessions.',
-        style: TextStyle(color: WispColors.muted),
-      ),
-      const SizedBox(height: 16),
-      TextField(
-        controller: port,
-        enabled: !loading && !saving,
-        keyboardType: TextInputType.number,
-        decoration: InputDecoration(
-          floatingLabelBehavior: FloatingLabelBehavior.always,
-          labelText: 'Wispnet port',
-          hintText: '7842',
+      if (section == null) ...[
+        sectionRow(
+          Icons.devices_outlined,
+          'Device',
+          'Name and network port',
+          () => showSection('Device'),
         ),
-      ),
+        sectionRow(
+          Icons.dns_outlined,
+          'Services',
+          'Local services and registry',
+          () => showSection('Services'),
+        ),
+        if (widget.onOwnerTools != null)
+          sectionRow(
+            Icons.lock_outline,
+            'Access & pairing',
+            'Device access, paired devices and requests',
+            widget.onOwnerTools!,
+          ),
+        sectionRow(
+          Icons.network_check,
+          'Connections',
+          'MCP setup and diagnostics',
+          () => showSection('Connections'),
+        ),
+      ] else ...[
+        Row(
+          children: [
+            IconButton(
+              tooltip: 'Back to settings',
+              icon: const Icon(Icons.arrow_back),
+              onPressed: saving ? null : () => showSection(null),
+            ),
+            Expanded(
+              child: Text(
+                section!,
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+      ],
       if (error != null)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 12),
           child: Text(error!, style: const TextStyle(color: WispColors.error)),
         ),
-      const SizedBox(height: 12),
-      FilledButton(
-        onPressed: loading || saving ? null : save,
-        child: Text(
-          loading
-              ? 'Loading…'
-              : saving
-              ? 'Saving…'
-              : 'Save',
+      if (section == 'Device') ...[
+        TextField(
+          controller: name,
+          enabled: !saving,
+          decoration: const InputDecoration(labelText: 'Device name'),
         ),
-      ),
-      if (widget.onLocalServices != null) ...[
         const SizedBox(height: 12),
-        OutlinedButton.icon(
-          onPressed: saving ? null : widget.onLocalServices,
-          icon: const Icon(Icons.dns_outlined),
-          label: const Text('Local services'),
+        Material(
+          type: MaterialType.transparency,
+          child: ExpansionTile(
+            tilePadding: EdgeInsets.zero,
+            title: const Text('Advanced'),
+            children: [
+              const Text(
+                'One port for all Wispnet services. Default: 7842. Changing it reconnects active sessions.',
+                style: TextStyle(color: WispColors.muted),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: port,
+                enabled: !loading && !saving,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Wispnet port'),
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        FilledButton(
+          onPressed: loading || saving ? null : save,
+          child: Text(
+            loading
+                ? 'Loading…'
+                : saving
+                ? 'Saving…'
+                : 'Save',
+          ),
         ),
       ],
-      if (widget.onOwnerTools != null) ...[
+      if (section == 'Services') ...[
+        if (widget.onLocalServices != null) ...[
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: saving ? null : widget.onLocalServices,
+            icon: const Icon(Icons.dns_outlined),
+            label: const Text('Local services'),
+          ),
+        ],
+      ],
+      if (section == 'Connections') ...[
         const SizedBox(height: 12),
         OutlinedButton.icon(
-          onPressed: saving ? null : widget.onOwnerTools,
-          icon: const Icon(Icons.devices),
-          label: const Text('Device access and pairing'),
+          onPressed: saving
+              ? null
+              : () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) =>
+                          ConnectionDiagnostics(backend: widget.backend),
+                    ),
+                  );
+                },
+          icon: const Icon(Icons.network_check),
+          label: const Text('Connection diagnostics'),
         ),
       ],
-      const SizedBox(height: 12),
-      OutlinedButton.icon(
-        onPressed: saving
-            ? null
-            : () {
-                FocusManager.instance.primaryFocus?.unfocus();
-                Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) =>
-                        ConnectionDiagnostics(backend: widget.backend),
-                  ),
-                );
-              },
-        icon: const Icon(Icons.network_check),
-        label: const Text('Connection diagnostics'),
-      ),
-      if (address.isNotEmpty) ...[
+      if (section == 'Services' && address.isNotEmpty) ...[
         const SizedBox(height: 16),
         const Text('Service registry'),
         const SizedBox(height: 4),
         const Text(
-          'Lists the services this device can access and their local URLs. Apps can use it to find and connect to services.',
+          'Services available to this device and their local URLs.',
           style: TextStyle(color: WispColors.muted),
         ),
         const SizedBox(height: 8),
@@ -1059,10 +1131,12 @@ class _SettingsFormState extends State<SettingsForm> {
           'settings-registry-copy',
         ),
         const SizedBox(height: 16),
+      ],
+      if (section == 'Connections' && address.isNotEmpty) ...[
         const Text('MCP (Model Context Protocol)'),
         const SizedBox(height: 4),
         const Text(
-          'Connect AI assistants to Wispnet to discover services and manage access. Add this URL to your MCP client. No token or account sign-in is needed. Both URLs work only on this device while local access is online.',
+          'Add this URL to your AI assistant’s MCP client. No token or sign-in needed. Works on this device while local access is online.',
           style: TextStyle(color: WispColors.muted),
         ),
         const SizedBox(height: 8),

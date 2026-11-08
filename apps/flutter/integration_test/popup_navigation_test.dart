@@ -50,13 +50,10 @@ void main() {
     }
 
     Future<void> ownerPage() async {
-      await tester.ensureVisible(find.text('Device access and pairing'));
-      await tester.tap(find.text('Device access and pairing'));
+      await tester.ensureVisible(find.text('Access & pairing'));
+      await tester.tap(find.text('Access & pairing'));
       await waitFor(find.text('Pair this device'));
-      expect(
-        find.text('Paired devices').hitTestable(),
-        findsOneWidget,
-      );
+      expect(find.text('Paired devices').hitTestable(), findsOneWidget);
       expect(find.text('Device and browser settings'), findsNothing);
       expect(find.byTooltip('Back').hitTestable(), findsOneWidget);
       expect(find.byTooltip('Close').hitTestable(), findsOneWidget);
@@ -71,13 +68,11 @@ void main() {
       );
       await waitFor(find.byTooltip('Settings'));
       await tester.tap(find.byTooltip('Settings'));
-      await waitFor(find.widgetWithText(TextField, 'Wispnet port'));
+      await waitFor(find.text('Device'));
       await ownerPage();
       await capture('desktop-owner-navigation');
       await tester.tap(find.byTooltip('Back').last);
-      await waitFor(
-        find.widgetWithText(TextField, 'Wispnet port').hitTestable(),
-      );
+      await waitFor(find.text('Device').hitTestable());
       expect(find.text('Pair this device'), findsNothing);
       await ownerPage();
       await tester.tap(find.byTooltip('Close').last);
@@ -86,8 +81,10 @@ void main() {
       expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
 
       await tester.tap(find.byTooltip('Settings'));
-      await waitFor(find.text('Local services'));
-      await tester.ensureVisible(find.text('Local services'));
+      await waitFor(find.text('Services'));
+      await tester.ensureVisible(find.text('Services'));
+      await tester.tap(find.text('Services'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Local services'));
       await waitFor(find.byKey(const ValueKey('share-service')));
       await tester.ensureVisible(find.byKey(const ValueKey('share-service')));
