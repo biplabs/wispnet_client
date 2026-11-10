@@ -117,9 +117,10 @@ impl Client {
         let port = listener.local_addr().map_err(|e| e.to_string())?.port();
         let weak = Arc::downgrade(self);
         let selected = incarnation.clone();
+        let capacity = self.config.max_streams_per_connection;
         let task = tokio::spawn(async move {
             let mut connections = JoinSet::new();
-            let slots = Arc::new(Semaphore::new(32));
+            let slots = Arc::new(Semaphore::new(capacity));
             let mut check = tokio::time::interval(Duration::from_secs(1));
             loop {
                 tokio::select! {

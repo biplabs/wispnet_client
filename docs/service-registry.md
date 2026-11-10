@@ -303,7 +303,11 @@ The TCP result includes a `tcp://127.0.0.1:PORT` URL. Each accepted connection
 rechecks the service's current incarnation and permissions. Grant removal,
 unpairing, network reset, or taking Wispnet offline closes the affected forward
 and its connections. Website-facing registry discovery remains HTTP-only.
-There are at most 32 forwards and 32 accepted connections per forward.
+There are at most 32 forwards. Each forward accepts up to the configured
+`transport.max_streams_per_connection` simultaneous connections (default 8,
+maximum 128). Persistent database/WebSocket clients retain a stream for their
+lifetime; leave headroom for health, catalog and other service traffic. The host
+`max_streams` global limit also applies.
 
 HTTP service link details also show the equivalent `ws://` address. Append the
 application's WebSocket path (for example `/rpc`). The HTTP gateway validates the

@@ -210,10 +210,10 @@ impl TransportConfig {
         }
         if !(1..=128).contains(&self.max_connections)
             || !(1..=256).contains(&self.max_streams)
-            || !(1..=32).contains(&self.max_streams_per_connection)
+            || !(1..=128).contains(&self.max_streams_per_connection)
         {
             return Err(ConfigError(
-                "transport limits must be connections 1-128, streams 1-256, streams per connection 1-32",
+                "transport limits must be connections 1-128, streams 1-256, streams per connection 1-128",
             ));
         }
         Ok(())
@@ -488,6 +488,27 @@ unknown = 'value'",
         }
     }
     #[test]
+    fn accepts_explicit_high_stream_capacity_without_changing_defaults() {
+        let baseline = Config::parse(&format!(
+            "{}\n[transport]\nbind_addr='127.0.0.1:0'\n",
+            valid()
+        ))
+        .unwrap();
+        assert_eq!(baseline.transport.unwrap().max_streams_per_connection, 8);
+        for streams in [32, 33, 64, 128] {
+            let text = format!(
+                "{}\n[transport]\nbind_addr='127.0.0.1:0'\nmax_streams=256\nmax_streams_per_connection={streams}\n",
+                valid()
+            );
+            let config = Config::parse(&text).unwrap();
+            assert_eq!(
+                config.transport.unwrap().max_streams_per_connection,
+                streams
+            );
+        }
+    }
+
+    #[test]
     fn invalid_network_configuration_fails_before_startup() {
         let peer = crate::identity::SecretKey::generate().public().to_string();
         let transport = "\n[transport]\nbind_addr='127.0.0.1:0'\n";
@@ -499,7 +520,7 @@ unknown = 'value'",
             format!("{}{transport}max_connections=0\n", valid()),
             format!("{}{transport}max_streams=257\n", valid()),
             format!("{}{transport}max_streams_per_connection=0\n", valid()),
-            format!("{}{transport}max_streams_per_connection=33\n", valid()),
+            format!("{}{transport}max_streams_per_connection=129\n", valid()),
             format!(
                 "{}{transport}{}",
                 valid(),

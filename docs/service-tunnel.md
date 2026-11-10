@@ -103,7 +103,7 @@ responses and never automatically reconnects or resends application bytes.
 | Handshake payload allocation | At most 128 bytes |
 | Default accepted/in-flight connections | 16; configurable 1-128 |
 | Default active streams across incoming connections | 64; configurable 1-256 |
-| Default streams per incoming connection | 8; configurable 1-32, also enforced through QUIC stream credit |
+| Default streams per incoming connection | 8; configurable 1-128, also enforced through QUIC stream credit |
 | QUIC receive window per stream | 64 KiB |
 | QUIC connection receive/send windows | 1 MiB each |
 | Application copy buffers | 16 KiB per direction, with backpressure |

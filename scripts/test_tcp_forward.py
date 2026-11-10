@@ -1,5 +1,6 @@
 """Real running-node TCP forwarding and HTTP WebSocket upgrade regression."""
 import base64
+import contextlib
 import fcntl
 import hashlib
 import json
@@ -57,7 +58,7 @@ class ForwardingTests(unittest.TestCase):
                     port = s.getsockname()[1]
                 state = root / name
                 config = root / (name + '.toml')
-                config.write_text(f'schema_version=2\ndevice_name="{name}"\nstate_dir="{state}"\nlog_level="error"\n[transport]\nbind_addr="127.0.0.1:{port}"\nrelay_url="https://relay.example"\n')
+                config.write_text(f'schema_version=2\ndevice_name="{name}"\nstate_dir="{state}"\nlog_level="error"\n[transport]\nbind_addr="127.0.0.1:{port}"\nrelay_url="https://relay.example"\nmax_streams=256\nmax_streams_per_connection=128\n')
                 peer = cli(config, 'host-init').split('Endpoint ID: ')[1].strip()
                 proc = subprocess.Popen([str(BINARY), 'agent', '--config', str(config)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 processes.append(proc)
@@ -118,6 +119,22 @@ class ForwardingTests(unittest.TestCase):
                     unlock.start()
                     self.assertEqual(a.request(op='resolve_link', link=f'wispnet://{pb}/database')['url'], url)
                     unlock.join()
+
+                # Persistent database sockets must exceed the former 32-slot cap
+                # without starving catalog/control operations on the same peer.
+                parsed = urlsplit(url)
+                with contextlib.ExitStack() as held:
+                    sockets = []
+                    for i in range(40):
+                        stream = held.enter_context(socket.create_connection((parsed.hostname, parsed.port), timeout=8))
+                        payload = f'held-{i}'.encode()
+                        stream.sendall(payload)
+                        self.assertEqual(stream.recv(len(payload)), payload)
+                        sockets.append(stream)
+                    self.assertTrue(catalog()['services'])
+                    for stream in sockets:
+                        stream.sendall(b'again')
+                        self.assertEqual(stream.recv(5), b'again')
 
                 service = next(s for s in catalog()['services'] if s['id'] == 'database')
                 with self.assertRaises(ValueError):
