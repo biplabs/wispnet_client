@@ -3477,7 +3477,7 @@ void main() {
       Machine(peer, {
         'state': 'available',
       }).canOpen({'kind': 'tcp', 'incarnation': incarnation}),
-      false,
+      true,
     );
   });
   test('saved order ignores missing and duplicate entries', () {

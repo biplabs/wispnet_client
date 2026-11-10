@@ -223,8 +223,15 @@ pub fn run(args: &[OsString]) -> Result<Value, String> {
                 .as_array()
                 .and_then(|a| a.iter().find(|s| s["id"] == service))
                 .ok_or("Service unavailable or not permitted")?;
+            if selected["kind"] == "tcp" {
+                api.request(json!({"op":"enable"}))?;
+                let route = api.request(json!({"op":"open","host":host,"service":service,"incarnation":selected["incarnation"]}))?;
+                return Ok(
+                    json!({"kind":"tcp","url":route["url"],"link":format!("wispnet://{host}/{service}")}),
+                );
+            }
             if selected["kind"] != "http" {
-                return Err("TCP services use wispnet tunnel".into());
+                return Err("Service has no connection links".into());
             }
             service_links(&api, host, selected)
         }

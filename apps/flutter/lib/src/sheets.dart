@@ -725,7 +725,9 @@ class _ServiceLinksState extends State<ServiceLinks> {
     });
     try {
       final args = {'host': widget.machine.id, 'service': widget.service['id']};
-      final settings = await widget.backend.invoke('settings', args);
+      final settings = widget.service['kind'] == 'tcp'
+          ? <String, dynamic>{}
+          : await widget.backend.invoke('settings', args);
       if (!mounted) return;
       var url = settings['url'] as String? ?? '';
       if (url.isEmpty) {
@@ -799,7 +801,16 @@ class _ServiceLinksState extends State<ServiceLinks> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (localUrl != null)
-          option('Local URL', localUrl!, 'Copy local URL')
+          option(
+            widget.service['kind'] == 'tcp' ? 'Local TCP address' : 'Local URL',
+            localUrl!,
+            widget.service['kind'] == 'tcp'
+                ? 'Copy TCP address'
+                : 'Copy local URL',
+            description: widget.service['kind'] == 'tcp'
+                ? 'Available to apps on this device while Wispnet is running. Going offline closes the forward.'
+                : null,
+          )
         else
           WispPanel(
             child: Column(
@@ -832,6 +843,13 @@ class _ServiceLinksState extends State<ServiceLinks> {
             publicUrl != null &&
             publicUrl.isNotEmpty)
           option('Public URL', publicUrl, 'Copy public URL'),
+        if (widget.service['kind'] == 'http' && localUrl != null)
+          option(
+            'WebSocket URL',
+            localUrl!.replaceFirst(RegExp(r'^http'), 'ws'),
+            'Copy WebSocket URL',
+            description: 'Append the service WebSocket path, such as /rpc. Uses the same service permissions.',
+          ),
       ],
     );
   }

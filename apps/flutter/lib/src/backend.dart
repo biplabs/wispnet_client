@@ -76,6 +76,7 @@ class Machine {
       service['enabled'] != false &&
       const [
         'http',
+        'tcp',
         'shell',
         'files',
         'file_inbox',

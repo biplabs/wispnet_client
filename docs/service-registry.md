@@ -282,3 +282,30 @@ and reconnect. Going offline closes both endpoints; use the app or owner socket
 to go online again. In-flight MCP port/offline changes finish their bounded reply
 even as the listener closes. An uncertain transport failure is never an instruction
 to repeat a write: inspect status/current revision first. No requests are replayed.
+
+## TCP connections through the running node
+
+TCP service cards have a link button showing the local loopback endpoint. Opening
+it starts a bounded TCP forward using the running node's existing identity and
+connections; there is no need to stop the node or run the standalone tunnel CLI.
+Native applications connect to the displayed `127.0.0.1:PORT` address. The listener
+is available only on this device, and its port can change after going offline or
+restarting Wispnet. No backend is selected by client-supplied addresses.
+
+From a paired computer, use:
+
+```sh
+wispnet service-links --host HOST_ID --service SERVICE_ID
+wispnet resolve-link --link wispnet://HOST_ID/SERVICE_ID
+```
+
+The TCP result includes a `tcp://127.0.0.1:PORT` URL. Each accepted connection
+rechecks the service's current incarnation and permissions. Grant removal,
+unpairing, network reset, or taking Wispnet offline closes the affected forward
+and its connections. Website-facing registry discovery remains HTTP-only.
+There are at most 32 forwards and 32 accepted connections per forward.
+
+HTTP service link details also show the equivalent `ws://` address. Append the
+application's WebSocket path (for example `/rpc`). The HTTP gateway validates the
+upgrade handshake and selected subprotocol, then relays binary and text frames
+bidirectionally with the same host permissions and local origin checks.

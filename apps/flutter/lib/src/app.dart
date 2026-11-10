@@ -222,7 +222,31 @@ class _WispHomeState extends State<WispHome>
           }
           await backend.invoke('setAccess', {'enabled': true});
           final resolved = await backend.invoke('resolveLink', {'link': link});
-          await backend.invoke('launch', {'url': resolved['url']});
+          if (resolved['kind'] == 'tcp') {
+            if (!mounted) return;
+            await showWispSheet<void>(
+              context,
+              title: 'TCP connection',
+              child: WispPanel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const Text(
+                      'Connect an app on this device to this address while Wispnet is online.',
+                    ),
+                    const SizedBox(height: 12),
+                    SelectableText(resolved['address'] as String),
+                    WispCopyButton(
+                      text: resolved['address'] as String,
+                      tooltip: 'Copy TCP address',
+                    ),
+                  ],
+                ),
+              ),
+            );
+          } else {
+            await backend.invoke('launch', {'url': resolved['url']});
+          }
         } catch (error) {
           notice(message(error));
         }

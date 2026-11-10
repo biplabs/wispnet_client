@@ -234,7 +234,8 @@ class MachineCard extends StatelessWidget {
       available: allowed,
       busy: busy,
       card: true,
-      onOpen: () => onOpen(service),
+      onOpen: () =>
+          service['kind'] == 'tcp' ? onLinks(service) : onOpen(service),
       onToggle: local && onToggle != null
           ? (value) => onToggle!(service, value)
           : null,
@@ -273,7 +274,7 @@ class MachineCard extends StatelessWidget {
             onPressed: busy || !allowed ? null : () => onOpen(service),
             icon: const Icon(Icons.folder_open_outlined, size: 20),
           ),
-        if (service['kind'] == 'http')
+        if (service['kind'] == 'http' || service['kind'] == 'tcp')
           IconButton(
             tooltip: 'Show links for ${service['id']}',
             color: WispColors.cyan,

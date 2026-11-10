@@ -10,6 +10,7 @@ mod service_registry;
 mod shell;
 mod shell_exec;
 mod shell_stream;
+mod tcp;
 use iroh::Endpoint;
 use serde_json::{Value, json};
 use std::{
@@ -36,6 +37,7 @@ fn runtime() -> &'static Runtime {
 pub struct Client {
     connections: connections::Pool,
     shells: shell::Shells,
+    tcp: tcp::Forwards,
     files: files::Files,
     pub endpoint: Endpoint,
     key: SecretKey,
@@ -89,6 +91,25 @@ impl Client {
         let host = peer(value)?;
         let id = argument(value, "service")?;
         let incarnation = argument(value, "incarnation")?;
+        let tcp = if host == self.endpoint.id() {
+            if let Some(authority) = &self.local_authority {
+                authority
+                    .services()
+                    .await
+                    .map_err(|e| e.to_string())?
+                    .iter()
+                    .any(|s| s.id == id && s.kind == wispnet_core::host::ServiceKind::Tcp)
+            } else {
+                false
+            }
+        } else {
+            self.connection_catalog(host).await?["services"]
+                .as_array()
+                .is_some_and(|s| s.iter().any(|s| s["id"] == id && s["kind"] == "tcp"))
+        };
+        if tcp {
+            return self.forward_tcp(value).await;
+        }
         if !wispnet_core::enrollment::valid_code(incarnation) {
             return Err("Refresh this service before opening".into());
         }
@@ -141,6 +162,7 @@ impl Client {
         Arc::new(Self {
             connections: connections::Pool::default(),
             shells: shell::Shells::default(),
+            tcp: tcp::Forwards::default(),
             files: files::Files::default(),
             endpoint,
             key,
@@ -169,6 +191,7 @@ impl Client {
         Ok(Arc::new(Self {
             connections: connections::Pool::default(),
             shells: shell::Shells::default(),
+            tcp: tcp::Forwards::default(),
             files: files::Files::default(),
             endpoint,
             key,
@@ -250,6 +273,7 @@ impl Client {
         Ok(Arc::new(Self {
             connections: connections::Pool::default(),
             shells: shell::Shells::default(),
+            tcp: tcp::Forwards::default(),
             files: client_files,
             endpoint: host.endpoint().clone(),
             key,
@@ -654,6 +678,7 @@ impl Client {
                 if host == self.endpoint.id() {
                     return Err("Cannot unpair this machine".into());
                 }
+                self.tcp.close(Some(host)).await;
                 let saved = self.saved_host(host).await?;
                 if let Some(authority) = &self.local_authority {
                     let known = authority
@@ -792,11 +817,11 @@ impl Client {
                 .map_err(|_| "Invalid access settings")?;
                 self.gateway.configure(self.clone(), settings).await
             }
-            "resolve_service" => self.resolve_service(value).await,
+            "resolve_service" => self.resolve_connection(value).await,
             "resolve_link" => {
                 let link =
                     wispnet_core::service_link::ServiceLink::parse(argument(value, "link")?)?;
-                self.resolve_service(&json!({"host":link.host,"service":link.service}))
+                self.resolve_connection(&json!({"host":link.host,"service":link.service}))
                     .await
             }
             "access_status" => Ok(json!({"enabled":self.gateway.is_enabled()})),
@@ -832,6 +857,7 @@ impl Client {
             "stop" => {
                 self.connections.forget(None);
                 let _guard = self.gateway.settings_lock.lock().await;
+                self.tcp.close(None).await;
                 if let Some(host) = &self._host {
                     host.set_services_enabled(false);
                 }
@@ -845,6 +871,7 @@ impl Client {
                 self.shells.close_all().await;
                 self.files.cancel_host(None);
                 let _guard = self.gateway.settings_lock.lock().await;
+                self.tcp.close(None).await;
                 let interrupted = self.gateway.interrupt().await;
                 self.connections.forget(None);
                 self.endpoint.network_change().await;

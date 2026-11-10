@@ -143,22 +143,24 @@ fn perform(api: &Api, task: Task) -> Result<Value, String> {
             name,
             enable,
         } => {
-            if service["kind"] != "http" {
-                return Err(
-                    "TCP services use wispnet tunnel; browser access supports HTTP services".into(),
-                );
+            if service["kind"] != "http" && service["kind"] != "tcp" {
+                return Err("This service has no browser or TCP connection".into());
             }
             if enable {
                 api.request(json!({"op":"enable"}))?;
             }
             let result=api.request(json!({"op":"open","host":host,"service":service["id"],"incarnation":service["incarnation"],"host_name":name}))?;
-            launch_browser(&result)?;
+            if !text(&result, "url").starts_with("tcp://") {
+                launch_browser(&result)?;
+            }
             Ok(result)
         }
         Task::ResolveLink(link) => {
             api.request(json!({"op":"enable"}))?;
             let result = api.request(json!({"op":"resolve_link","link":link}))?;
-            launch_browser(&result)?;
+            if !text(&result, "url").starts_with("tcp://") {
+                launch_browser(&result)?;
+            }
             Ok(result)
         }
         Task::Settings => api.request(json!({"op":"gateway_settings"})),
@@ -1800,8 +1802,29 @@ impl App {
                         self.last_poll = Instant::now() - Duration::from_secs(5);
                     }
                     Kind::Open => {
-                        self.modal=Some(Modal::Info{title:"Browser service".into(),lines:vec![text(&value,"url").into(),"This URL belongs to this computer. Over SSH, use a browser on this computer or forward its local gateway port; it is not a public URL.".into(),"On a graphical session the browser opens automatically. TCP services use the native tunnel command.".into()],scroll:0});
-                        self.message = "Browser route ready".into();
+                        let tcp = text(&value, "url").starts_with("tcp://");
+                        let (title, detail) = if tcp {
+                            (
+                                "TCP connection",
+                                "Connect a native app on this computer to this loopback address while Wispnet is online.",
+                            )
+                        } else {
+                            (
+                                "Browser service",
+                                "This URL belongs to this computer. The browser opens automatically on graphical sessions; WebSocket clients can use the equivalent ws:// URL.",
+                            )
+                        };
+                        self.modal = Some(Modal::Info {
+                            title: title.into(),
+                            lines: vec![text(&value, "url").into(), detail.into()],
+                            scroll: 0,
+                        });
+                        self.message = if tcp {
+                            "TCP forward ready"
+                        } else {
+                            "Browser route ready"
+                        }
+                        .into();
                         self.last_poll = Instant::now() - Duration::from_secs(5);
                     }
                     Kind::Settings => {

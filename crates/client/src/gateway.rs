@@ -313,7 +313,7 @@ impl Gateways {
         Ok(url)
     }
 }
-trait ServiceIo: AsyncRead + AsyncWrite + Unpin + Send {}
+pub(crate) trait ServiceIo: AsyncRead + AsyncWrite + Unpin + Send {}
 impl<T: AsyncRead + AsyncWrite + Unpin + Send> ServiceIo for T {}
 
 struct ActiveRequest<'a>(&'a AtomicUsize);
