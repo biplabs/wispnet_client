@@ -1778,31 +1778,33 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                     ],
                   ),
                 ],
-                const SizedBox(height: 4),
-                // Shortcut keys bar
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      for (final entry in const [
-                        ('Ctrl-C', '\u0003'),
-                        ('Esc', '\u001b'),
-                        ('Tab', '\t'),
-                        ('↑', '\u001b[A'),
-                        ('↓', '\u001b[B'),
-                        ('←', '\u001b[D'),
-                        ('→', '\u001b[C'),
-                      ])
-                        TextButton(
-                          onPressed: pane.state == ShellPaneState.attached
-                              ? () => unawaited(pane.sendInput(entry.$2))
-                              : null,
-                          child: Text(entry.$1),
-                        ),
-                    ],
+                if (pane.android) ...[
+                  const SizedBox(height: 4),
+                  // Shortcut keys bar
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        for (final entry in const [
+                          ('Ctrl-C', '\u0003'),
+                          ('Esc', '\u001b'),
+                          ('Tab', '\t'),
+                          ('↑', '\u001b[A'),
+                          ('↓', '\u001b[B'),
+                          ('←', '\u001b[D'),
+                          ('→', '\u001b[C'),
+                        ])
+                          TextButton(
+                            onPressed: pane.state == ShellPaneState.attached
+                                ? () => unawaited(pane.sendInput(entry.$2))
+                                : null,
+                            child: Text(entry.$1),
+                          ),
+                      ],
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
             if (_modeMenu)
@@ -2016,7 +2018,7 @@ class _SplitViewport extends StatelessWidget {
   }
 }
 
-class _TerminalPaneView extends StatelessWidget {
+class _TerminalPaneView extends StatefulWidget {
   const _TerminalPaneView({
     super.key,
     required this.pane,
@@ -2036,12 +2038,58 @@ class _TerminalPaneView extends StatelessWidget {
   final VoidCallback onFocus;
   final VoidCallback onClose;
 
+  @override
+  State<_TerminalPaneView> createState() => _TerminalPaneViewState();
+}
+
+class _TerminalPaneViewState extends State<_TerminalPaneView> {
+  DesktopShellPane get pane => widget.pane;
+  DesktopInputMode get effectiveMode => widget.effectiveMode;
+  bool get focused => widget.focused;
+  bool get showPaneControls => widget.showPaneControls;
+  VoidCallback get onFocus => widget.onFocus;
+  VoidCallback get onClose => widget.onClose;
+  VoidCallback get onKeyboardRequest => widget.onKeyboardRequest;
+
+  int? _anchor;
+  int? _extent;
+  int? _selectionVersion;
+  int get _start => math.min(_anchor!, _extent!);
+  int get _end => math.max(_anchor!, _extent!);
+  bool get _hasSelection =>
+      _anchor != null && _extent != null && _start != _end;
+
+  int _cellAt(Offset position) {
+    final row = (position.dy / 17).floor().clamp(0, pane.buffer.rows - 1);
+    final col = (position.dx / 8.4).round().clamp(0, pane.buffer.cols);
+    return row * pane.buffer.cols + col;
+  }
+
+  void _copySelection() {
+    if (!_hasSelection) return;
+    final lines = pane.buffer.lines;
+    final text = <String>[];
+    for (
+      var row = _start ~/ pane.buffer.cols;
+      row <= (_end - 1) ~/ pane.buffer.cols;
+      row++
+    ) {
+      final from = math.max(0, _start - row * pane.buffer.cols);
+      final to = math.min(pane.buffer.cols, _end - row * pane.buffer.cols);
+      text.add(
+        lines[pane.buffer.activeStartLine + row]
+            .sublist(from, to)
+            .map((cell) => cell.char)
+            .join()
+            .trimRight(),
+      );
+    }
+    unawaited(Clipboard.setData(ClipboardData(text: text.join('\n'))));
+  }
+
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
     if (pane.android) return KeyEventResult.ignored;
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-      return KeyEventResult.ignored;
-    }
-    if (effectiveMode == DesktopInputMode.line) {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
@@ -2049,6 +2097,15 @@ class _TerminalPaneView extends StatelessWidget {
     final meta = HardwareKeyboard.instance.isMetaPressed;
     final shift = HardwareKeyboard.instance.isShiftPressed;
 
+    if ((ctrl && shift && key == LogicalKeyboardKey.keyC) ||
+        (meta && key == LogicalKeyboardKey.keyC) ||
+        (ctrl && key == LogicalKeyboardKey.keyC && _hasSelection)) {
+      _copySelection();
+      return KeyEventResult.handled;
+    }
+    if (effectiveMode == DesktopInputMode.line) {
+      return KeyEventResult.ignored;
+    }
     if ((ctrl && shift && key == LogicalKeyboardKey.keyV) ||
         (meta && key == LogicalKeyboardKey.keyV)) {
       unawaited(
@@ -2106,6 +2163,10 @@ class _TerminalPaneView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (_selectionVersion != pane.buffer.version) {
+      _anchor = null;
+      _extent = null;
+    }
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: onFocus,
@@ -2157,15 +2218,40 @@ class _TerminalPaneView extends StatelessWidget {
                                 unawaited(pane.resize(cols, rows));
                               });
                             }
-                            return CustomPaint(
-                              painter: _TerminalCanvasPainter(
-                                buffer: pane.buffer,
-                                version: pane.buffer.version,
-                                cursorRow: pane.buffer.cursorRow,
-                                cursorCol: pane.buffer.cursorCol,
-                                showCursor:
-                                    focused &&
-                                    pane.state == ShellPaneState.attached,
+                            return GestureDetector(
+                              key: const ValueKey('desktop-terminal-selection'),
+                              dragStartBehavior: DragStartBehavior.down,
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {
+                                onFocus();
+                                setState(() {
+                                  _anchor = null;
+                                  _extent = null;
+                                });
+                              },
+                              onPanStart: (details) {
+                                onFocus();
+                                setState(() {
+                                  _selectionVersion = pane.buffer.version;
+                                  _anchor = _cellAt(details.localPosition);
+                                  _extent = _anchor;
+                                });
+                              },
+                              onPanUpdate: (details) => setState(() {
+                                _extent = _cellAt(details.localPosition);
+                              }),
+                              child: CustomPaint(
+                                painter: _TerminalCanvasPainter(
+                                  buffer: pane.buffer,
+                                  selectionStart: _hasSelection ? _start : null,
+                                  selectionEnd: _hasSelection ? _end : null,
+                                  version: pane.buffer.version,
+                                  cursorRow: pane.buffer.cursorRow,
+                                  cursorCol: pane.buffer.cursorCol,
+                                  showCursor:
+                                      focused &&
+                                      pane.state == ShellPaneState.attached,
+                                ),
                               ),
                             );
                           },
@@ -2314,6 +2400,8 @@ class _TerminalCanvasPainter extends CustomPainter {
     required this.cursorRow,
     required this.cursorCol,
     required this.showCursor,
+    this.selectionStart,
+    this.selectionEnd,
   });
 
   final TerminalEmulatorBuffer buffer;
@@ -2321,6 +2409,8 @@ class _TerminalCanvasPainter extends CustomPainter {
   final int cursorRow;
   final int cursorCol;
   final bool showCursor;
+  final int? selectionStart;
+  final int? selectionEnd;
 
   static final Map<(String, int, bool), TextPainter> _painterCache = {};
 
@@ -2388,6 +2478,22 @@ class _TerminalCanvasPainter extends CustomPainter {
         );
       }
 
+      if (selectionStart != null && selectionEnd != null) {
+        final from = math.max(0, selectionStart! - r * buffer.cols);
+        final to = math.min(buffer.cols, selectionEnd! - r * buffer.cols);
+        if (to > from) {
+          canvas.drawRect(
+            Rect.fromLTWH(
+              from * charWidth,
+              y,
+              (to - from) * charWidth,
+              lineHeight,
+            ),
+            Paint()..color = WispColors.cyan.withValues(alpha: 0.35),
+          );
+        }
+      }
+
       // 2. Coalesce and draw contiguous non-space text runs with identical style.
       c = 0;
       while (c < row.length) {
@@ -2427,6 +2533,8 @@ class _TerminalCanvasPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _TerminalCanvasPainter oldDelegate) =>
+      oldDelegate.selectionStart != selectionStart ||
+      oldDelegate.selectionEnd != selectionEnd ||
       oldDelegate.version != version ||
       oldDelegate.showCursor != showCursor ||
       oldDelegate.cursorRow != cursorRow ||
