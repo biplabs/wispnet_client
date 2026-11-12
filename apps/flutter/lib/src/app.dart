@@ -889,18 +889,24 @@ class _WispHomeState extends State<WispHome>
     await showWispSheet<void>(
       context,
       title: 'Settings',
+      showHeader: false,
       child: Builder(
         builder: (pageContext) => SettingsForm(
           backend: backend,
           deviceName: snapshot['name'] as String? ?? '',
-          onLocalServices: () {
-            deviceSettings(servicesOnly: true, from: pageContext);
-          },
+          localServices: ServiceSettings(
+            backend: backend,
+            android: snapshot['desktop'] != true,
+            host: snapshot['peer'] as String? ?? '',
+            servicesOnly: true,
+            showSectionSelector: false,
+            onChanged: () {
+              unawaited(poll());
+              unawaited(refresh());
+            },
+          ),
           onOwnerTools: () {
             manage(from: pageContext);
-          },
-          onAdvancedOwnerTools: () {
-            deviceSettings(section: 'Owner operations', from: pageContext);
           },
           onSaved: () {
             if (!pageContext.mounted || !wispPageIsCurrent(pageContext)) return;

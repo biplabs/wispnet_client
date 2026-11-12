@@ -1474,9 +1474,16 @@ void main() {
         await tester.ensureVisible(find.text('Device'));
         await tester.tap(find.text('Device'));
         await tester.pumpAndSettle();
+        expect(find.text('Settings'), findsNothing);
+        expect(find.text('Device'), findsOneWidget);
+        expect(find.byTooltip('Close'), findsOneWidget);
+        expect(find.byType(ExpansionTile), findsNothing);
+        await tester.ensureVisible(
+          find.widgetWithText(TextField, 'Wispnet port'),
+        );
         expect(
           find.widgetWithText(TextField, 'Wispnet port').hitTestable(),
-          findsNothing,
+          findsOneWidget,
         );
         await tester.enterText(
           find.widgetWithText(TextField, 'Device name'),
@@ -1488,6 +1495,8 @@ void main() {
         await tester.ensureVisible(find.text('Connections'));
         await tester.tap(find.text('Connections'));
         await tester.pumpAndSettle();
+        expect(find.text('Settings'), findsNothing);
+        expect(find.text('Connections'), findsOneWidget);
         expect(find.byKey(const ValueKey('settings-mcp-copy')), findsOneWidget);
         expect(
           find.byKey(const ValueKey('settings-registry-copy')),
@@ -1517,8 +1526,6 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Device'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Advanced'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextField, 'Wispnet port'),
@@ -1709,8 +1716,6 @@ void main() {
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Local services'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('share-service')));
     await tester.pumpAndSettle();
@@ -1903,8 +1908,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Local services'));
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('share-service')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Custom'));
@@ -2010,8 +2013,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Local services'));
-    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('share-service')), findsOneWidget);
     expect(find.text('Pair this device'), findsNothing);
     expect(find.text('Device and browser settings'), findsNothing);
@@ -2072,8 +2073,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Local services'));
-    await tester.pumpAndSettle();
     final files = find.descendant(
       of: find.byType(ServiceSettings),
       matching: find.byWidgetPredicate(
@@ -2124,8 +2123,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Local services'));
-    await tester.pumpAndSettle();
     await tester.tap(
       find.descendant(
         of: find.byType(ServiceSettings),
@@ -2150,9 +2147,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Services'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Local services'));
-      await tester.pumpAndSettle();
-      expect(find.text('Local services'), findsNWidgets(2));
+      expect(find.text('Local services'), findsNothing);
+      expect(find.text('Services'), findsOneWidget);
       expect(find.byType(ServiceSettings), findsOneWidget);
       final files = find.descendant(
         of: find.byType(ServiceSettings),
@@ -3090,8 +3086,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Local services'));
-    await tester.pumpAndSettle();
     expect(find.text('Enable Shell'), findsNothing);
     await tester.tap(find.byTooltip('Shell access'));
     await tester.pumpAndSettle();
@@ -3512,8 +3506,6 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Services'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Local services'));
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('share-service')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Custom'));
@@ -3568,8 +3560,6 @@ void main() {
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Services'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Local services'));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const ValueKey('share-service')));
       await tester.pumpAndSettle();

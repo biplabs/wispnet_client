@@ -136,7 +136,6 @@ void main() {
         await tester.ensureVisible(find.text('Services'));
         await tester.tap(find.text('Services'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Local services'));
         await waitFor(find.byKey(const ValueKey('share-service')));
         expect(find.text('Pair this device'), findsNothing);
         expect(find.text('Remove service'), findsNothing);
@@ -319,8 +318,6 @@ void main() {
         await tester.tap(find.byTooltip('Settings'));
         await waitFor(find.text('Device'));
         await tester.tap(find.text('Device'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('Advanced'));
         await tester.pumpAndSettle();
         await waitFor(find.widgetWithText(TextField, 'Wispnet port'));
         expect(find.text('Device and browser settings'), findsNothing);

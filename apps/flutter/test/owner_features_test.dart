@@ -348,20 +348,12 @@ void main() {
       await fixture.close(tester);
     });
 
-    testWidgets('$platform owner operations are under advanced settings', (
-      tester,
-    ) async {
-      final backend = OwnerFeaturesBackend(android);
-      await mountOwner(tester, backend);
+    testWidgets('$platform settings omit owner operations', (tester) async {
+      await mountOwner(tester, OwnerFeaturesBackend(android));
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Advanced'));
-      await tester.tap(find.text('Advanced'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Owner operations'));
-      await tester.pumpAndSettle();
-      expect(find.text('No saved owner operations.'), findsOneWidget);
-      expect(find.byType(DropdownButton<String>), findsNothing);
+      expect(find.text('Advanced'), findsNothing);
+      expect(find.text('Owner operations'), findsNothing);
       await fixture.close(tester);
     });
     testWidgets(
@@ -564,8 +556,6 @@ void main() {
           await tester.pumpAndSettle();
           await tester.ensureVisible(find.text('Services'));
           await tester.tap(find.text('Services'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('Local services'));
           await tester.pumpAndSettle();
           await tester.ensureVisible(
             find.byKey(const ValueKey('share-service')),

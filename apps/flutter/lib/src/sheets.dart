@@ -867,16 +867,14 @@ class SettingsForm extends StatefulWidget {
     required this.backend,
     required this.deviceName,
     required this.onSaved,
-    this.onLocalServices,
+    this.localServices,
     this.onOwnerTools,
-    this.onAdvancedOwnerTools,
   });
   final WispnetBackend backend;
   final String deviceName;
   final VoidCallback onSaved;
-  final VoidCallback? onLocalServices;
+  final Widget? localServices;
   final VoidCallback? onOwnerTools;
-  final VoidCallback? onAdvancedOwnerTools;
   @override
   State<SettingsForm> createState() => _SettingsFormState();
 }
@@ -1024,6 +1022,28 @@ class _SettingsFormState extends State<SettingsForm> {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
+      Row(
+        children: [
+          if (section != null)
+            IconButton(
+              tooltip: 'Back to settings',
+              icon: const Icon(Icons.arrow_back, size: 20),
+              onPressed: saving ? null : () => showSection(null),
+            ),
+          Expanded(
+            child: Text(
+              section ?? 'Settings',
+              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Close',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close, size: 20),
+          ),
+        ],
+      ),
+      const SizedBox(height: 12),
       if (section == null) ...[
         sectionRow(
           Icons.devices_outlined,
@@ -1050,30 +1070,6 @@ class _SettingsFormState extends State<SettingsForm> {
           'MCP setup and diagnostics',
           () => showSection('Connections'),
         ),
-        if (widget.onAdvancedOwnerTools != null)
-          sectionRow(
-            Icons.tune,
-            'Advanced',
-            'Owner operations across hosts',
-            () => showSection('Advanced'),
-          ),
-      ] else ...[
-        Row(
-          children: [
-            IconButton(
-              tooltip: 'Back to settings',
-              icon: const Icon(Icons.arrow_back),
-              onPressed: saving ? null : () => showSection(null),
-            ),
-            Expanded(
-              child: Text(
-                section!,
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 16),
       ],
       if (error != null)
         Padding(
@@ -1087,26 +1083,16 @@ class _SettingsFormState extends State<SettingsForm> {
           decoration: const InputDecoration(labelText: 'Device name'),
         ),
         const SizedBox(height: 12),
-        Material(
-          type: MaterialType.transparency,
-          child: ExpansionTile(
-            tilePadding: EdgeInsets.zero,
-            title: const Text('Advanced'),
-            children: [
-              const Text(
-                'One port for all Wispnet services. Default: 7842. Changing it reconnects active sessions.',
-                style: TextStyle(color: WispColors.muted),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: port,
-                enabled: !loading && !saving,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'Wispnet port'),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ),
+        const Text(
+          'One port for all Wispnet services. Default: 7842. Changing it reconnects active sessions.',
+          style: TextStyle(color: WispColors.muted),
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: port,
+          enabled: !loading && !saving,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(labelText: 'Wispnet port'),
         ),
         const SizedBox(height: 12),
         FilledButton(
@@ -1120,21 +1106,8 @@ class _SettingsFormState extends State<SettingsForm> {
           ),
         ),
       ],
-      if (section == 'Advanced' && widget.onAdvancedOwnerTools != null)
-        OutlinedButton(
-          onPressed: saving ? null : widget.onAdvancedOwnerTools,
-          child: const Text('Owner operations'),
-        ),
-      if (section == 'Services') ...[
-        if (widget.onLocalServices != null) ...[
-          const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: saving ? null : widget.onLocalServices,
-            icon: const Icon(Icons.dns_outlined),
-            label: const Text('Local services'),
-          ),
-        ],
-      ],
+      if (section == 'Services' && widget.localServices != null)
+        widget.localServices!,
       if (section == 'Connections') ...[
         const SizedBox(height: 12),
         OutlinedButton.icon(

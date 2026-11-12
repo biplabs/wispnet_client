@@ -64,8 +64,6 @@ void main() {
         await waitFor(find.text('Device'));
         await tester.tap(find.text('Device'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Advanced'));
-        await tester.pumpAndSettle();
         await waitFor(find.widgetWithText(TextField, 'Wispnet port'));
         await waitFor(find.widgetWithText(FilledButton, 'Save'));
         expect(

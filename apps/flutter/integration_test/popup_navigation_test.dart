@@ -85,7 +85,6 @@ void main() {
       await tester.ensureVisible(find.text('Services'));
       await tester.tap(find.text('Services'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Local services'));
       await waitFor(find.byKey(const ValueKey('share-service')));
       await tester.ensureVisible(find.byKey(const ValueKey('share-service')));
       await tester.tap(find.byKey(const ValueKey('share-service')));
