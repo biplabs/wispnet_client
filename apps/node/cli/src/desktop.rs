@@ -115,6 +115,19 @@ fn browser_url(value: &str) -> Result<&str> {
     }
     Ok(value)
 }
+// TCP forwards are application endpoints, never browser handoffs.
+fn local_service_url(value: &str) -> Result<&str> {
+    if let Some(port) = value.strip_prefix("tcp://127.0.0.1:") {
+        if !port.is_empty()
+            && port.bytes().all(|c| c.is_ascii_digit())
+            && port.parse::<u16>().is_ok_and(|p| p > 0)
+        {
+            return Ok(value);
+        }
+        return Err("Invalid local TCP address".into());
+    }
+    browser_url(value)
+}
 fn public_browser_url(value: &str) -> Result<&str> {
     let (parsed, authority, path) = parsed_handoff(value)?;
     let host = authority.split(':').next().unwrap_or_default();
@@ -643,7 +656,7 @@ impl Bridge {
                 self.api.request(json!({"op":"enable"}))?;
                 let host=text(args,"host")?; let name=self.lock()?.preferences["device_ids"][host].clone();
                 let result=self.api.request(json!({"op":"open","host":host,"service":text(args,"service")?,"incarnation":text(args,"incarnation")?,"host_name":name}))?;
-                Ok(json!({"url":browser_url(text(&result,"url")?)?}))
+                Ok(json!({"url":local_service_url(text(&result,"url")?)?}))
             }
             "openShell" => self.open_shell(args),
             "fileWorkspaces" => { let mut request=self.target(args,&["files","file_inbox"],Some("files"))?; request["op"]=json!("file_workspaces"); self.api.request(request) }
@@ -994,7 +1007,7 @@ mod tests {
                                 let result = match request["op"].as_str().unwrap_or("") {
                                     "status" => status.lock().unwrap().clone(),
                                     "catalog" => json!({"host":request["host"],"services":status.lock().unwrap()["host"]["services"]}),
-                                    "open" => json!({"url":"http://web.localhost:18355/"}),
+                                    "open" => json!({"url": if request["service"] == "tcp" { "tcp://127.0.0.1:18356" } else { "http://web.localhost:18355/" }}),
                                     "diagnose_connection" => {
                                         std::thread::sleep(Duration::from_millis(300));
                                         json!({"selected_path":"direct"})
@@ -1034,6 +1047,33 @@ mod tests {
         fn drop(&mut self) {
             self.stop.store(true, Ordering::Release);
             self.worker.take().unwrap().join().unwrap();
+        }
+    }
+
+    #[test]
+    fn tcp_open_returns_local_endpoint_without_permitting_browser_launch() {
+        let fixture = Fixture::new();
+        let result = fixture
+            .bridge
+            .dispatch(
+                "open",
+                &json!({
+                    "host":"b".repeat(64),"service":"tcp","incarnation":"c".repeat(64)
+                }),
+            )
+            .unwrap();
+        assert_eq!(result["url"], "tcp://127.0.0.1:18356");
+        assert!(browser_url(result["url"].as_str().unwrap()).is_err());
+        for invalid in [
+            "tcp://127.0.0.1:0",
+            "tcp://127.0.0.1:65536",
+            "tcp://127.0.0.1:80/",
+            "tcp://127.0.0.1:80?x",
+            "tcp://example.com:80",
+            "tcp://user@127.0.0.1:80",
+            "tcp://127.0.0.1:80\n",
+        ] {
+            assert!(local_service_url(invalid).is_err(), "{invalid}");
         }
     }
 

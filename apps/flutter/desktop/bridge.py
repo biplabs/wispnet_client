@@ -59,6 +59,14 @@ def browser_url(url):
     return url
 
 
+def local_service_url(url):
+    if url.startswith('tcp://'):
+        if not re.fullmatch(r'tcp://127\.0\.0\.1:[0-9]{1,5}', url) or not 0 < int(url.rsplit(':', 1)[1]) <= 65535:
+            raise ValueError('Invalid local TCP address')
+        return url
+    return browser_url(url)
+
+
 def public_browser_url(url):
     if (not isinstance(url, str) or len(url) > 2048
         or any(ord(c) < 33 or 127 <= ord(c) <= 159 for c in url)):
@@ -515,7 +523,7 @@ class Bridge:
             result = self.api.request(op='open', host=args['host'], service=args['service'], incarnation=args['incarnation'],
                                       host_name=self.preferences.get('device_ids', {}).get(args['host']))
             # Both platforms launch the stable service address directly.
-            return {'url': browser_url(result['url'])}
+            return {'url': local_service_url(result['url'])}
         if method == 'openShell':
             return self.open_shell(args)
         if method == 'fileWorkspaces':

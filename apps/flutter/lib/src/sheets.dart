@@ -808,17 +808,19 @@ class _ServiceLinksState extends State<ServiceLinks> {
                 ? 'Copy TCP address'
                 : 'Copy local URL',
             description: widget.service['kind'] == 'tcp'
-                ? 'Available to apps on this device while Wispnet is running. Going offline closes the forward.'
-                : null,
+                ? 'Use this address in apps on this device while Wispnet is online. Other devices get their own local address.'
+                : 'Open this URL in a browser or app on this device while Wispnet is online. Other devices get their own local URL.',
           )
         else
           WispPanel(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Local URL',
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                Text(
+                  widget.service['kind'] == 'tcp'
+                      ? 'Local TCP address'
+                      : 'Local URL',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 6),
                 Text(
@@ -837,7 +839,7 @@ class _ServiceLinksState extends State<ServiceLinks> {
           'Wispnet URL',
           'wispnet://${widget.machine.id}/${widget.service['id']}',
           'Copy Wispnet link',
-          description: 'Stays the same across devices, even if their local ports differ. Use this for a consistent link to the service.',
+          description: 'Use this link to bookmark or share the service across devices with Wispnet installed and access to the host. Wispnet resolves it to a local address on each device.',
         ),
         if (publication?['enabled'] == true &&
             publicUrl != null &&

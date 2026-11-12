@@ -14,7 +14,7 @@ import 'package:wispnet/src/file_shares.dart';
 import 'package:wispnet/src/space.dart';
 import 'package:wispnet/src/service_settings.dart';
 import 'package:wispnet/src/sheets.dart'
-    show ConnectionDiagnostics, PairingForm;
+    show ConnectionDiagnostics, PairingForm, ServiceLinks;
 import 'package:wispnet/src/terminal_sheet.dart';
 import 'package:wispnet/ui.dart';
 
@@ -100,6 +100,20 @@ class DesktopDiagnosticFake extends DesktopFake {
       };
     }
     return result;
+  }
+}
+
+class TcpLinksBackend extends FakeBackend {
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method, [
+    Map<String, dynamic> arguments = const {},
+  ]) async {
+    if (method == 'open') {
+      calls.add((method, arguments));
+      return {'url': 'tcp://127.0.0.1:18356'};
+    }
+    return super.invoke(method, arguments);
   }
 }
 
@@ -626,6 +640,46 @@ Future<void> screenshot(WidgetTester tester, String name) async {
 }
 
 void main() {
+  testWidgets('TCP links show a local endpoint and explain both links', (
+    tester,
+  ) async {
+    final backend = TcpLinksBackend();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ServiceLinks(
+            backend: backend,
+            machine: Machine(peer, {'state': 'available'}),
+            service: {
+              'id': 'embeddings',
+              'kind': 'tcp',
+              'incarnation': incarnation,
+            },
+            canResolve: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Local TCP address'), findsOneWidget);
+    expect(find.text('tcp://127.0.0.1:18356'), findsOneWidget);
+    expect(find.text('wispnet://$peer/embeddings'), findsOneWidget);
+    expect(
+      find.textContaining('Other devices get their own local address'),
+      findsOneWidget,
+    );
+    expect(
+      find.textContaining('Wispnet resolves it to a local address'),
+      findsOneWidget,
+    );
+    expect(
+      backend.calls.where(
+        (call) => call.$1 == 'settings' || call.$1 == 'launch',
+      ),
+      isEmpty,
+    );
+  });
+
   testWidgets(
     'service links enable access and launch the resolved HTTP URL once',
     (tester) async {

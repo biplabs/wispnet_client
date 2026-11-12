@@ -536,6 +536,21 @@ class BridgeTests(unittest.TestCase):
         publication['incarnation'] = 'e' * 64
         self.assertNotIn('public_access', self.bridge.snapshot()['hosts'][OWN]['catalog']['services'][0])
 
+    def test_tcp_open_returns_local_address_but_cannot_launch_browser(self):
+        address = 'tcp://127.0.0.1:18356'
+        self.mock.side_effect = lambda **args: {'url': address} if args['op'] == 'open' else {}
+        self.assertEqual(self.bridge.dispatch('open', dict(host=PEER, service='tcp', incarnation=INCARNATION)), {'url': address})
+        with patch.object(module.subprocess, 'run') as launch:
+            with self.assertRaises(ValueError):
+                self.bridge.dispatch('launch', {'url': address})
+            launch.assert_not_called()
+        for invalid in ('tcp://127.0.0.1:0', 'tcp://127.0.0.1:65536',
+                        'tcp://127.0.0.1:80/', 'tcp://127.0.0.1:80?x',
+                        'tcp://example.com:80', 'tcp://user@127.0.0.1:80',
+                        'tcp://127.0.0.1:80\n'):
+            with self.subTest(url=invalid), self.assertRaises(ValueError):
+                module.local_service_url(invalid)
+
     def test_handoff_only_accepts_local_service_roots_and_registry_json(self):
         self.assertEqual(module.browser_url('http://web.localhost:18000/'), 'http://web.localhost:18000/')
         registry = 'http://wispnet.localhost:18400/registry'
