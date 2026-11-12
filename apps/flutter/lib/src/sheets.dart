@@ -1144,6 +1144,7 @@ class _SettingsFormState extends State<SettingsForm> {
         const SizedBox(height: 16),
       ],
       if (section == 'Connections' && address.isNotEmpty) ...[
+        const SizedBox(height: 24),
         const Text('MCP (Model Context Protocol)'),
         const SizedBox(height: 4),
         const Text(
