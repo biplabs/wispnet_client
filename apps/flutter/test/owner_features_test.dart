@@ -81,6 +81,55 @@ class PermissionBackend extends OwnerFeaturesBackend {
   }
 }
 
+class PairingFlowBackend extends OwnerFeaturesBackend {
+  PairingFlowBackend(super.android) {
+    (status['invitations'] as List).clear();
+  }
+  bool expired = false, failStatus = false, outgoing = false;
+
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method, [
+    Map<String, dynamic> arguments = const {},
+  ]) async {
+    if (method == 'ownerStatus' && failStatus) {
+      throw const FormatException('Status unavailable');
+    }
+    final result = await super.invoke(method, arguments);
+    if (method == 'pair') outgoing = true;
+    if (method == 'ownerRequest' &&
+        arguments['payload']?['op'] == 'invite_qr' &&
+        expired) {
+      return {
+        ...result,
+        'expires_at': DateTime.now().millisecondsSinceEpoch ~/ 1000 - 1,
+      };
+    }
+    if (method == 'snapshot' && outgoing) {
+      final hosts = Map<String, dynamic>.from(result['hosts'] as Map);
+      final remote = Map<String, dynamic>.from(hosts[fixture.peer] as Map);
+      remote['state'] = 'approval_pending';
+      remote['status'] = 'Pending approval on this host';
+      return {
+        ...result,
+        'order': {
+          'machines': ['e' * 64, fixture.peer],
+        },
+        'hosts': {
+          ...hosts,
+          'e' * 64: {
+            'name': 'Earlier device',
+            'state': 'available',
+            'status': 'Available',
+          },
+          fixture.peer: remote,
+        },
+      };
+    }
+    return result;
+  }
+}
+
 Future<void> tapHeader(WidgetTester tester, String tooltip) async {
   final button = find.byTooltip(tooltip).last;
   await tester.ensureVisible(button);
@@ -120,6 +169,130 @@ void main() {
   });
   for (final android in [false, true]) {
     final platform = android ? 'Android' : 'desktop';
+    testWidgets(
+      '$platform receiving a request returns to the list with inline approval first',
+      (tester) async {
+        final backend = PairingFlowBackend(android);
+        await mountOwner(tester, backend);
+        await fixture.openPairedDevices(tester);
+        await openInvitation(tester);
+        backend.failStatus = true;
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('pairing-qr')), findsOneWidget);
+        expect(
+          find.text('Cannot check pairing status. Retrying…'),
+          findsOneWidget,
+        );
+        backend.failStatus = false;
+        (backend.status['invitations'] as List).add({
+          'name': 'Incoming device',
+          'peer': 'c' * 64,
+          'invitation': 'issued-id',
+          'state': 'pending',
+        });
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+        expect(find.text('Paired devices').hitTestable(), findsOneWidget);
+        expect(find.byKey(const ValueKey('pairing-qr')), findsNothing);
+        expect(find.text('c' * 64), findsOneWidget);
+        expect(find.byTooltip('Settings for Incoming device'), findsNothing);
+        final card = find.byKey(const ValueKey('pairing-request-issued-id'));
+        expect(
+          tester.getTopLeft(card).dy,
+          lessThan(tester.getTopLeft(find.text('j-strix · aaaaaaaa').last).dy),
+        );
+        expect(find.text('Reject'), findsOneWidget);
+        await fixture.screenshot(tester, '$platform-inline-pairing-request');
+        await tester.ensureVisible(find.text('Approve'));
+        await tester.tap(find.text('Approve'));
+        await tester.pumpAndSettle();
+        expect(backend.ownerCalls.last['operation'], {
+          'op': 'approve_invitation',
+          'invitation': 'issued-id',
+          'expected_revision': 7,
+        });
+        expect(card, findsNothing);
+        await fixture.close(tester);
+      },
+    );
+
+    testWidgets(
+      '$platform expired invitation stays distinct from a received request',
+      (tester) async {
+        final backend = PairingFlowBackend(android)..expired = true;
+        await mountOwner(tester, backend);
+        await fixture.openPairedDevices(tester);
+        await openInvitation(tester);
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Pairing code expired. Generate a new code to try again.'),
+          findsOneWidget,
+        );
+        expect(find.text('Approve'), findsNothing);
+        backend.expired = false;
+        await tester.tap(find.text('Generate new code'));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const ValueKey('pairing-qr')), findsOneWidget);
+        await fixture.close(tester);
+      },
+    );
+
+    testWidgets(
+      '$platform inline rejection removes only the reviewed request',
+      (tester) async {
+        final backend = OwnerFeaturesBackend(android);
+        final services = jsonEncode(backend.status['host']['services']);
+        await mountOwner(tester, backend);
+        await fixture.openPairedDevices(tester);
+        await tester.ensureVisible(find.text('Reject'));
+        await tester.tap(find.text('Reject'));
+        await tester.pumpAndSettle();
+        expect(backend.ownerCalls.single['operation'], {
+          'op': 'reject_invitation',
+          'invitation': 'request-id',
+          'expected_revision': 7,
+        });
+        expect(find.text('Reject'), findsNothing);
+        expect(jsonEncode(backend.status['host']['services']), services);
+        expect(find.text('j-strix · aaaaaaaa').last, findsOneWidget);
+        await fixture.close(tester);
+      },
+    );
+
+    testWidgets(
+      '$platform submitting pairing opens the list with the outgoing pending device first',
+      (tester) async {
+        final backend = PairingFlowBackend(android)..paired = false;
+        await mountOwner(tester, backend);
+        await tester.tap(find.byKey(const ValueKey('remote-pair-button')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Pairing Code'));
+        await tester.pumpAndSettle();
+        await tester.enterText(
+          find.widgetWithText(TextField, 'Pairing code'),
+          'wispnet1:test',
+        );
+        await tester.pump();
+        await tester.tap(find.widgetWithText(FilledButton, 'Pair'));
+        await tester.pumpAndSettle();
+        expect(find.text('Paired devices').hitTestable(), findsOneWidget);
+        expect(find.text(fixture.peer), findsOneWidget);
+        expect(find.byTooltip('Settings for j-strix'), findsNothing);
+        expect(find.text('Approve'), findsNothing);
+        expect(find.text('Reject'), findsNothing);
+        final waiting = find.text('Waiting for approval on the other device');
+        expect(waiting, findsOneWidget);
+        expect(
+          tester.getTopLeft(waiting).dy,
+          lessThan(
+            tester.getTopLeft(find.text('Earlier device · eeeeeeee').last).dy,
+          ),
+        );
+        await fixture.close(tester);
+      },
+    );
     testWidgets(
       '$platform per-device permissions preserve other devices and reject stale revisions',
       (tester) async {
@@ -320,13 +493,7 @@ void main() {
         final backend = DeferredOwnerBackend(android);
         await mountOwner(tester, backend);
         await fixture.openPairedDevices(tester);
-        await tester.tap(find.text('Review 1 pairing request'));
-        await tester.pumpAndSettle();
-        final approve = find.widgetWithText(OutlinedButton, 'Approve device');
-        await tester.ensureVisible(approve);
-        await tester.tap(approve);
-        await tester.pumpAndSettle();
-        final confirm = find.widgetWithText(FilledButton, 'Approve device');
+        final confirm = find.widgetWithText(FilledButton, 'Approve');
         await tester.ensureVisible(confirm);
         await tester.tap(confirm);
         await tester.pump();
@@ -362,7 +529,7 @@ void main() {
         await tester.tap(find.byTooltip('Settings for j-strix'));
         await tester.pumpAndSettle();
         final settings = tester.widget<ServiceSettings>(
-          find.byType(ServiceSettings),
+          find.byType(ServiceSettings).last,
         );
         expect(settings.android, android);
         expect(settings.devicePeer, fixture.peer);
@@ -497,23 +664,17 @@ void main() {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
         await fixture.openPairedDevices(tester);
-        await tester.tap(find.text('Review 1 pairing request'));
-        await tester.pumpAndSettle();
-        final approve = find.widgetWithText(OutlinedButton, 'Approve device');
+        expect(find.text('c' * 64), findsOneWidget);
+        expect(backend.ownerCalls, isEmpty);
+        final approve = find.widgetWithText(FilledButton, 'Approve');
         await tester.ensureVisible(approve);
         await tester.tap(approve);
-        await tester.pumpAndSettle();
-        expect(backend.ownerCalls, isEmpty);
-        final confirm = find.widgetWithText(FilledButton, 'Approve device');
-        await tester.ensureVisible(confirm);
-        await tester.tap(confirm);
         await tester.pumpAndSettle();
         expect(backend.ownerCalls.single, {
           'op': 'mutate',
           'operation': {
             'op': 'approve_invitation',
             'invitation': 'request-id',
-            'services': ['web'],
             'expected_revision': 7,
           },
         });

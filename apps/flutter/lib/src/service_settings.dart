@@ -23,12 +23,14 @@ class ServiceSettings extends StatefulWidget {
     this.host = '',
     this.devicePeer,
     this.showSectionSelector = true,
+    this.inlineRequests = false,
   });
   final String initialSection;
   final bool servicesOnly, android;
   final String host;
   final String? devicePeer;
   final bool showSectionSelector;
+  final bool inlineRequests;
   final String? serviceId;
   final WispnetBackend backend;
   final VoidCallback onChanged;
@@ -44,7 +46,9 @@ class _ServiceSettingsState extends State<ServiceSettings> {
   );
   Map<String, dynamic>? status;
   List<dynamic> operations = [];
-  late String section = widget.servicesOnly
+  late String section = widget.inlineRequests
+      ? 'Pairing requests'
+      : widget.servicesOnly
       ? 'My services'
       : widget.initialSection;
   String? error;
@@ -74,6 +78,12 @@ class _ServiceSettingsState extends State<ServiceSettings> {
     timer = Timer.periodic(const Duration(seconds: 3), (_) {
       if (!busy) unawaited(load());
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant ServiceSettings oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.inlineRequests && !busy) unawaited(load());
   }
 
   @override
@@ -576,80 +586,58 @@ class _ServiceSettingsState extends State<ServiceSettings> {
     await load();
   }
 
-  Future<void> approve(Map<String, dynamic> invitation) async {
+  Widget requestCard(Map<String, dynamic> invitation) {
     final revision = status!['host']['revision'] as int;
-    final hasFileFolders =
-        (status!['host']['file_exports'] as Map? ?? {}).isNotEmpty;
-    final existing = services
-        .where(
-          (s) =>
-              (s['allow'] as List).contains(invitation['peer']) &&
-              (s['kind'] != 'files' || hasFileFolders),
-        )
-        .map((s) => s['id'] as String)
-        .toSet();
-    final allowed = {...existing};
-    final available = List<Map<String, dynamic>>.of(services);
-    await showWispSheet<void>(
-      context,
-      title: 'Approve ${invitation['name'] ?? 'device'}',
-      child: _ActionForm(
-        builder: (context, submit, working, failure) => StatefulBuilder(
-          builder: (context, update) => Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              SelectableText(invitation['peer'] as String),
-              const SizedBox(height: 12),
-              const Text(
-                'Compare the full device identity. Choose services to grant; existing grants are preserved. No selection pairs without adding access.',
-              ),
-              for (final s in available)
-                WispToggleListTile(
-                  title: Text(s['id'] as String),
-                  subtitle: s['kind'] == 'files'
-                      ? Text(
-                          hasFileFolders
-                              ? 'Send files into your configured folders without confirming each transfer.'
-                              : 'Set a shared folder before granting Files access.',
-                        )
-                      : null,
-                  value:
-                      (s['kind'] != 'files' || hasFileFolders) &&
-                      allowed.contains(s['id']),
-                  onChanged:
-                      working ||
-                          existing.contains(s['id']) ||
-                          (s['kind'] == 'files' && !hasFileFolders)
-                      ? null
-                      : (v) => update(() {
-                          if (v!) {
-                            allowed.add(s['id'] as String);
-                          } else {
-                            allowed.remove(s['id']);
-                          }
-                        }),
-                ),
-              if (failure != null)
-                Text(failure, style: const TextStyle(color: WispColors.error)),
-              FilledButton(
-                onPressed: working
-                    ? null
-                    : () => submit(
-                        () => mutate({
-                          'op': 'approve_invitation',
-                          'invitation': invitation['invitation'],
-                          'services': allowed.toList(),
-                        }, revision),
-                      ),
-                child: const Text('Approve device'),
-              ),
-            ],
-          ),
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: WispPanel(
+        key: ValueKey('pairing-request-${invitation['invitation']}'),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              invitation['name'] as String? ?? 'New device',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Pending approval',
+              style: TextStyle(color: WispColors.amber),
+            ),
+            const SizedBox(height: 8),
+            SelectableText(invitation['peer'] as String),
+            const SizedBox(height: 12),
+            const Text(
+              'Compare the full device ID before approving. Service permissions can be set after pairing.',
+            ),
+            const SizedBox(height: 12),
+            FilledButton(
+              onPressed: busy
+                  ? null
+                  : () => run(
+                      () => mutate({
+                        'op': 'approve_invitation',
+                        'invitation': invitation['invitation'],
+                      }, revision),
+                    ),
+              child: const Text('Approve'),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              onPressed: busy
+                  ? null
+                  : () => run(
+                      () => mutate({
+                        'op': 'reject_invitation',
+                        'invitation': invitation['invitation'],
+                      }, revision),
+                    ),
+              child: const Text('Reject'),
+            ),
+          ],
         ),
       ),
     );
-    widget.onChanged();
-    await load();
   }
 
   Future<void> combined(String op) async {
@@ -895,6 +883,7 @@ class _ServiceSettingsState extends State<ServiceSettings> {
       children: [
         if (!widget.servicesOnly &&
             widget.showSectionSelector &&
+            !widget.inlineRequests &&
             widget.devicePeer == null) ...[
           DropdownButton<String>(
             isExpanded: true,
@@ -915,7 +904,8 @@ class _ServiceSettingsState extends State<ServiceSettings> {
         if (error != null)
           Text(error!, style: const TextStyle(color: WispColors.error)),
         if (status == null) ...[
-          if (error == null) const LinearProgressIndicator(),
+          if (error == null && !widget.inlineRequests)
+            const LinearProgressIndicator(),
         ] else if (widget.devicePeer != null) ...[
           const Text(
             'Service permissions',
@@ -1064,31 +1054,9 @@ class _ServiceSettingsState extends State<ServiceSettings> {
               ),
             ),
         ] else if (section == 'Pairing requests') ...[
-          if (requests.isEmpty) const Text('No pending requests.'),
-          for (final i in requests)
-            WispPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(i['name'] as String? ?? 'New device'),
-                  SelectableText(i['peer'] as String),
-                  action('Approve device', () => run(() => approve(i))),
-                  action(
-                    'Reject request',
-                    () => run(
-                      () => confirm(
-                        'Reject request?',
-                        i['peer'] as String,
-                        () => mutate({
-                          'op': 'reject_invitation',
-                          'invitation': i['invitation'],
-                        }, status!['host']['revision'] as int),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          if (requests.isEmpty && !widget.inlineRequests)
+            const Text('No pending requests.'),
+          for (final invitation in requests) requestCard(invitation),
         ] else ...[
           action(
             'Add client across hosts',
@@ -1123,7 +1091,9 @@ class _ServiceSettingsState extends State<ServiceSettings> {
               ),
             ),
         ],
-        if (!widget.servicesOnly && widget.devicePeer == null)
+        if (!widget.servicesOnly &&
+            widget.devicePeer == null &&
+            !widget.inlineRequests)
           action('Refresh', () => run(load)),
       ],
     );
@@ -1231,7 +1201,7 @@ class _Invitation extends StatefulWidget {
 class _InvitationState extends State<_Invitation> {
   Map<String, dynamic>? qr;
   String? error;
-  bool expired = false, showQr = true;
+  bool expired = false, showQr = true, checking = false;
   Timer? timer;
   @override
   void initState() {
@@ -1240,6 +1210,12 @@ class _InvitationState extends State<_Invitation> {
   }
 
   Future<void> issue() async {
+    timer?.cancel();
+    setState(() {
+      qr = null;
+      expired = false;
+      error = null;
+    });
     try {
       final next = await widget.backend.invoke('ownerRequest', {
         'payload': {'op': 'invite_qr'},
@@ -1256,24 +1232,33 @@ class _InvitationState extends State<_Invitation> {
   }
 
   Future<void> check() async {
-    if (expired) return;
+    if (expired || checking || qr == null) return;
+    checking = true;
     try {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       final status = await widget.backend.invoke('ownerStatus');
       final received = (status['invitations'] as List).any(
-        (i) =>
-            i['invitation'] == qr!['invitation'] &&
-            !['issued', 'challenged'].contains(i['state']),
+        (i) => i['invitation'] == qr!['invitation'] && i['state'] == 'pending',
       );
+      if (!mounted || !wispPageIsCurrent(context)) return;
+      if (received) {
+        timer?.cancel();
+        Navigator.pop(context);
+        return;
+      }
       if (mounted) {
         setState(() {
-          expired = now >= (qr!['expires_at'] as num) || received;
+          expired = now >= (qr!['expires_at'] as num);
+          error = null;
         });
       }
       if (expired) timer?.cancel();
     } catch (_) {
-      if (mounted) setState(() => expired = true);
-      timer?.cancel();
+      if (mounted) {
+        setState(() => error = 'Cannot check pairing status. Retrying…');
+      }
+    } finally {
+      checking = false;
     }
   }
 
@@ -1285,11 +1270,19 @@ class _InvitationState extends State<_Invitation> {
 
   @override
   Widget build(BuildContext context) {
-    if (error != null) return Text(error!);
+    if (error != null && qr == null) return Text(error!);
     if (qr == null) return const CircularProgressIndicator();
     if (expired) {
-      return const Text(
-        'Code expired or request received. Close to review pairing requests.',
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Text('Pairing code expired. Generate a new code to try again.'),
+          const SizedBox(height: 12),
+          OutlinedButton(
+            onPressed: issue,
+            child: const Text('Generate new code'),
+          ),
+        ],
       );
     }
     final matrix = (qr!['matrix'] as List)
@@ -1298,8 +1291,10 @@ class _InvitationState extends State<_Invitation> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (error != null)
+          Text(error!, style: const TextStyle(color: WispColors.error)),
         const Text(
-          'Scan or copy the code, then approve the request here and choose allowed services.',
+          'Scan or copy the code. The request will appear in Paired devices for approval.',
         ),
         SelectableText(qr!['host'] as String),
         const SizedBox(height: 16),
@@ -1353,7 +1348,7 @@ class _InvitationState extends State<_Invitation> {
           OutlinedButton(
             onPressed: () async {
               await check();
-              if (!expired) {
+              if (context.mounted && wispPageIsCurrent(context) && !expired) {
                 await Clipboard.setData(
                   ClipboardData(text: qr!['code'] as String),
                 );

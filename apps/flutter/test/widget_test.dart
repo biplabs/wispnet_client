@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:ui' as ui;
 
@@ -434,7 +435,7 @@ class DesktopFake extends FakeBackend {
     'invitations': [
       {
         'name': 'New device',
-        'peer': peer,
+        'peer': 'c' * 64,
         'invitation': 'request-id',
         'state': 'pending',
       },
@@ -478,6 +479,30 @@ class DesktopFake extends FakeBackend {
     if (method == 'ownerRequest') {
       ownerCalls.add(arguments['payload'] as Map<String, dynamic>);
       final operation = arguments['payload']['operation'];
+      if (const [
+        'approve_invitation',
+        'reject_invitation',
+      ].contains(operation?['op'])) {
+        final invitations = status['invitations'] as List;
+        final invitation = invitations
+            .cast<Map>()
+            .where((i) => i['invitation'] == operation['invitation'])
+            .firstOrNull;
+        if (invitation != null && operation['op'] == 'approve_invitation') {
+          final clients = status['host']['clients'] as List;
+          if (!clients.any((c) => c['peer'] == invitation['peer'])) {
+            clients.add({
+              'peer': invitation['peer'] as String,
+              'name': invitation['name'] as String,
+            });
+          }
+        }
+        invitations.removeWhere(
+          (i) => i['invitation'] == operation['invitation'],
+        );
+        status['host']['revision']++;
+      }
+
       if (operation?['op'] == 'shell') {
         final shell = (status['host']['services'] as List).singleWhere(
           (s) => s['id'] == 'shell',
@@ -519,7 +544,9 @@ class DesktopFake extends FakeBackend {
       return {
         ...reply,
         'desktop': true,
-        'pendingRequests': 1,
+        'pendingRequests': (status['invitations'] as List)
+            .where((i) => i['state'] == 'pending')
+            .length,
         'hosts': {
           ...reply['hosts'] as Map<String, dynamic>,
           'd' * 64: {
@@ -2612,21 +2639,14 @@ void main() {
     final backend = DesktopFake();
     await mount(tester, backend, size: const Size(1000, 850));
     await openPairedDevices(tester);
-    await tester.tap(find.text('Review 1 pairing request'));
+    final existing = jsonEncode(backend.status['host']['services']);
+    await tester.ensureVisible(find.text('Approve'));
+    await tester.tap(find.text('Approve'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Approve device'));
-    await tester.pumpAndSettle();
-    final grant = tester.widget<WispToggleListTile>(
-      find.widgetWithText(WispToggleListTile, 'web'),
-    );
-    expect(grant.value, true);
-    expect(grant.onChanged, isNull);
-    await tester.tap(find.text('Approve device').last);
-    await tester.pumpAndSettle();
+    expect(jsonEncode(backend.status['host']['services']), existing);
     expect(backend.ownerCalls.single['operation'], {
       'op': 'approve_invitation',
       'invitation': 'request-id',
-      'services': ['web'],
       'expected_revision': 7,
     });
     await close(tester);
@@ -3321,34 +3341,23 @@ void main() {
   );
   for (final configured in [false, true]) {
     testWidgets(
-      'pairing ${configured ? 'permits' : 'disables'} Files grants ${configured ? 'with' : 'without'} a shared folder',
+      'inline pairing adds no Files grants ${configured ? 'with' : 'without'} a shared folder',
       (tester) async {
         final backend = filesBackend(
           exports: configured ? {'training': '/srv/training'} : {},
         );
         await mount(tester, backend, size: const Size(1000, 1000));
         await openPairedDevices(tester);
-        await tester.tap(find.text('Review 1 pairing request'));
+        final existing = jsonEncode(backend.status['host']['services']);
+        await tester.ensureVisible(find.text('Approve'));
+        await tester.tap(find.text('Approve'));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Approve device'));
-        await tester.pumpAndSettle();
-        final grant = find.widgetWithText(WispToggleListTile, 'files');
-        expect(tester.widget<WispToggleListTile>(grant).value, false);
-        if (configured) {
-          expect(tester.widget<WispToggleListTile>(grant).onChanged, isNotNull);
-          await tester.tap(grant);
-        } else {
-          expect(tester.widget<WispToggleListTile>(grant).onChanged, isNull);
-          expect(
-            find.text('Set a shared folder before granting Files access.'),
-            findsOneWidget,
-          );
-        }
-        await tester.tap(find.text('Approve device').last);
-        await tester.pumpAndSettle();
+        expect(jsonEncode(backend.status['host']['services']), existing);
         expect(
-          (backend.ownerCalls.single['operation'] as Map)['services'],
-          configured ? ['web', 'files'] : ['web'],
+          (backend.ownerCalls.single['operation'] as Map).containsKey(
+            'services',
+          ),
+          isFalse,
         );
         await close(tester);
       },
@@ -3646,12 +3655,7 @@ void main() {
       expect(find.byTooltip('Refresh remote services'), findsNothing);
       await openPairedDevices(tester);
       expect(find.text('Paired devices'), findsOneWidget);
-      await tester.tap(find.text('Review 1 pairing request'));
-      await tester.pumpAndSettle();
-      expect(
-        find.widgetWithText(OutlinedButton, 'Approve device'),
-        findsOneWidget,
-      );
+      expect(find.widgetWithText(FilledButton, 'Approve'), findsOneWidget);
       await close(tester);
     },
   );

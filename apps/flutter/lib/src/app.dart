@@ -583,6 +583,7 @@ class _WispHomeState extends State<WispHome>
   Future<void> pair({String? code, BuildContext? from}) async {
     if (pairingSheet) return;
     pairingSheet = true;
+    var requested = false;
     await showWispSheet<void>(
       from ?? context,
       title: 'Pair a device',
@@ -592,19 +593,24 @@ class _WispHomeState extends State<WispHome>
           initialCode: code,
           onPaired: () {
             if (!pageContext.mounted || !wispPageIsCurrent(pageContext)) return;
+            requested = true;
             Navigator.pop(pageContext);
-            notice('Pending owner approval');
             unawaited(poll());
           },
         ),
       ),
     );
     pairingSheet = false;
+    if (requested && mounted) {
+      await poll();
+      if (from == null && mounted) await manage();
+    }
   }
 
   Future<void> manage({BuildContext? from}) async {
     var remotes = machines.where((m) => m.data['local'] != true).toList();
-    var pendingRequests = snapshot['pendingRequests'] as int? ?? 0;
+    var incomingPeers = <String>{};
+    var pendingPeers = <String>{};
     var loading = false;
     await showWispSheet<void>(
       from ?? context,
@@ -638,6 +644,17 @@ class _WispHomeState extends State<WispHome>
                   },
                 );
               }
+              final nextPending = <String>{
+                for (final invitation in owner['invitations'] as List? ?? [])
+                  if (invitation['state'] == 'pending')
+                    invitation['peer'] as String,
+                for (final entry in records.entries)
+                  if (entry.value['state'] == 'approval_pending') entry.key,
+              };
+              final newPending = nextPending
+                  .difference(pendingPeers)
+                  .isNotEmpty;
+              pendingPeers = nextPending;
               final order = next['order'] as Map? ?? {};
               update(() {
                 remotes = orderedIds(records.keys, order['machines'] as List?)
@@ -649,8 +666,19 @@ class _WispHomeState extends State<WispHome>
                     )
                     .where((machine) => machine.data['local'] != true)
                     .toList();
-                pendingRequests = next['pendingRequests'] as int? ?? 0;
+                incomingPeers = {
+                  for (final invitation in owner['invitations'] as List? ?? [])
+                    if (invitation['state'] == 'pending')
+                      invitation['peer'] as String,
+                };
               });
+              if (newPending) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (pageContext.mounted && wispPageIsCurrent(pageContext)) {
+                    Scrollable.maybeOf(pageContext)?.position.jumpTo(0);
+                  }
+                });
+              }
             } catch (error) {
               notice('Cannot refresh paired devices: ${message(error)}');
             } finally {
@@ -668,51 +696,74 @@ class _WispHomeState extends State<WispHome>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (pendingRequests > 0)
-                  OutlinedButton(
-                    onPressed: () {
-                      openPage(
-                        deviceSettings(
-                          section: 'Pairing requests',
-                          from: pageContext,
-                        ),
-                      );
-                    },
-                    child: Text(
-                      'Review $pendingRequests pairing ${pendingRequests == 1 ? 'request' : 'requests'}',
-                    ),
-                  ),
-                for (final machine in remotes)
+                ServiceSettings(
+                  backend: backend,
+                  android: snapshot['desktop'] != true,
+                  host: snapshot['peer'] as String? ?? '',
+                  inlineRequests: true,
+                  onChanged: () {
+                    unawaited(poll());
+                    unawaited(refreshDevices());
+                  },
+                ),
+                for (final machine in [
+                  ...remotes.where((m) => m.state == 'approval_pending'),
+                  ...remotes.where((m) => m.state != 'approval_pending'),
+                ].where((m) => !incomingPeers.contains(m.id)))
                   Padding(
                     padding: const EdgeInsets.only(bottom: 10),
-                    child: WispPanel(
-                      padding: EdgeInsets.zero,
-                      child: WispListItem(
-                        leading: const Icon(
-                          Icons.computer,
-                          color: WispColors.cyan,
-                        ),
-                        title: Text('${machine.name} · ${shortId(machine.id)}'),
-                        titleStyle: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                        ),
-                        subtitle: Text(
-                          machine.status,
-                          style: TextStyle(color: stateColor(machine)),
-                        ),
-                        onTap: () => openPage(
-                          machineSettings(machine, from: pageContext),
-                        ),
-                        actions: [
-                          WispSettingsButton(
-                            tooltip: 'Settings for ${machine.name}',
-                            onPressed: () => openPage(
-                              machineSettings(machine, from: pageContext),
+                    child: machine.state == 'approval_pending'
+                        ? WispPanel(
+                            key: ValueKey('outgoing-pairing-${machine.id}'),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  machine.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                const Text(
+                                  'Waiting for approval on the other device',
+                                  style: TextStyle(color: WispColors.amber),
+                                ),
+                                const SizedBox(height: 8),
+                                SelectableText(machine.id),
+                              ],
+                            ),
+                          )
+                        : WispPanel(
+                            padding: EdgeInsets.zero,
+                            child: WispListItem(
+                              leading: const Icon(
+                                Icons.computer,
+                                color: WispColors.cyan,
+                              ),
+                              title: Text(
+                                '${machine.name} · ${shortId(machine.id)}',
+                              ),
+                              titleStyle: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                              ),
+                              subtitle: Text(
+                                machine.status,
+                                style: TextStyle(color: stateColor(machine)),
+                              ),
+                              onTap: () => openPage(
+                                machineSettings(machine, from: pageContext),
+                              ),
+                              actions: [
+                                WispSettingsButton(
+                                  tooltip: 'Settings for ${machine.name}',
+                                  onPressed: () => openPage(
+                                    machineSettings(machine, from: pageContext),
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                        ],
-                      ),
-                    ),
                   ),
                 FilledButton(
                   onPressed: () {
@@ -1285,11 +1336,7 @@ class _WispHomeState extends State<WispHome>
                         const SizedBox(height: 20),
                         if (pendingRequests > 0) ...[
                           OutlinedButton.icon(
-                            onPressed: busy
-                                ? null
-                                : () => deviceSettings(
-                                    section: 'Pairing requests',
-                                  ),
+                            onPressed: busy ? null : manage,
                             icon: const Icon(
                               Icons.notifications_active_outlined,
                               size: 18,
