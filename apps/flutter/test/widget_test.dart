@@ -510,6 +510,11 @@ class DesktopFake extends FakeBackend {
       return {};
     }
     final reply = await super.invoke(method, arguments);
+    if (method == 'removeHost') {
+      (status['host']['clients'] as List).removeWhere(
+        (client) => client['peer'] == arguments['host'],
+      );
+    }
     if (method == 'snapshot') {
       return {
         ...reply,

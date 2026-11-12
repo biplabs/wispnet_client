@@ -21,10 +21,14 @@ class ServiceSettings extends StatefulWidget {
     this.serviceId,
     this.android = false,
     this.host = '',
+    this.devicePeer,
+    this.showSectionSelector = true,
   });
   final String initialSection;
   final bool servicesOnly, android;
   final String host;
+  final String? devicePeer;
+  final bool showSectionSelector;
   final String? serviceId;
   final WispnetBackend backend;
   final VoidCallback onChanged;
@@ -81,9 +85,9 @@ class _ServiceSettingsState extends State<ServiceSettings> {
   Future<void> load() async {
     try {
       final next = await adapter.status();
-      final journal = await widget.backend.invoke('ownerData', {
-        'op': 'operations',
-      });
+      final journal = section == 'Owner operations'
+          ? await widget.backend.invoke('ownerData', {'op': 'operations'})
+          : {'value': <dynamic>[]};
       var address = '';
       String? addressError;
       final selected = (next['host']['services'] as List)
@@ -889,7 +893,9 @@ class _ServiceSettingsState extends State<ServiceSettings> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (!widget.servicesOnly) ...[
+        if (!widget.servicesOnly &&
+            widget.showSectionSelector &&
+            widget.devicePeer == null) ...[
           DropdownButton<String>(
             isExpanded: true,
             value: section,
@@ -908,9 +914,36 @@ class _ServiceSettingsState extends State<ServiceSettings> {
         ],
         if (error != null)
           Text(error!, style: const TextStyle(color: WispColors.error)),
-        if (status == null)
-          const LinearProgressIndicator()
-        else if (section == 'My services') ...[
+        if (status == null) ...[
+          if (error == null) const LinearProgressIndicator(),
+        ] else if (widget.devicePeer != null) ...[
+          const Text(
+            'Service permissions',
+            style: TextStyle(fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          const Text('Allow this device to use services on this machine.'),
+          if (!clients.any((client) => client['peer'] == widget.devicePeer))
+            const Text('This device is not approved on this machine.')
+          else
+            for (final service in services)
+              WispToggleListTile(
+                title: Text(service['id'] as String),
+                subtitle: Text(wispServiceTypeLabel(service['kind'] as String)),
+                value: (service['allow'] as List? ?? []).contains(
+                  widget.devicePeer,
+                ),
+                onChanged: busy
+                    ? null
+                    : (allowed) => run(() async {
+                        await mutate({
+                          'op': allowed! ? 'grant_service' : 'revoke_service',
+                          'service': service['id'],
+                          'peer': widget.devicePeer,
+                        }, status!['host']['revision'] as int);
+                      }),
+              ),
+        ] else if (section == 'My services') ...[
           if (widget.serviceId == null) ...[
             for (final s in services.where(
               (s) =>
@@ -1090,7 +1123,8 @@ class _ServiceSettingsState extends State<ServiceSettings> {
               ),
             ),
         ],
-        if (!widget.servicesOnly) action('Refresh', () => run(load)),
+        if (!widget.servicesOnly && widget.devicePeer == null)
+          action('Refresh', () => run(load)),
       ],
     );
   }
@@ -1438,8 +1472,9 @@ class _CustomServiceFormState extends State<_CustomServiceForm> {
     text: endpoint.port.toString(),
   );
   late String kind = widget.service?['kind'] as String? ?? 'http';
-  late final Set<String> allowed =
-      (widget.service?['allow'] as List? ?? []).cast<String>().toSet();
+  late final Set<String> allowed = (widget.service?['allow'] as List? ?? [])
+      .cast<String>()
+      .toSet();
 
   @override
   void dispose() {
@@ -1465,8 +1500,7 @@ class _CustomServiceFormState extends State<_CustomServiceForm> {
           initialValue: kind,
           decoration: const InputDecoration(
             labelText: 'Protocol',
-            helperText:
-                'HTTP: websites and APIs with browser links. TCP: raw connections for native apps. UDP services are not supported yet.',
+            helperText: 'HTTP: websites and APIs with browser links. TCP: raw connections for native apps. UDP services are not supported yet.',
             helperMaxLines: 5,
           ),
           items: ['http', 'tcp']

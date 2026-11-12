@@ -315,10 +315,12 @@ class MachineSettings extends StatefulWidget {
     required this.machine,
     required this.backend,
     required this.onChanged,
+    this.permissions,
   });
   final Machine machine;
   final WispnetBackend backend;
   final VoidCallback onChanged;
+  final Widget? permissions;
   @override
   State<MachineSettings> createState() => _MachineSettingsState();
 }
@@ -380,6 +382,10 @@ class _MachineSettingsState extends State<MachineSettings> {
         style: const TextStyle(color: WispColors.muted),
       ),
       const SizedBox(height: 16),
+      if (widget.permissions != null) ...[
+        widget.permissions!,
+        const SizedBox(height: 16),
+      ],
       OutlinedButton(
         style: dangerStyle,
         onPressed: busy ? null : confirmRemove,
@@ -863,12 +869,14 @@ class SettingsForm extends StatefulWidget {
     required this.onSaved,
     this.onLocalServices,
     this.onOwnerTools,
+    this.onAdvancedOwnerTools,
   });
   final WispnetBackend backend;
   final String deviceName;
   final VoidCallback onSaved;
   final VoidCallback? onLocalServices;
   final VoidCallback? onOwnerTools;
+  final VoidCallback? onAdvancedOwnerTools;
   @override
   State<SettingsForm> createState() => _SettingsFormState();
 }
@@ -1033,7 +1041,7 @@ class _SettingsFormState extends State<SettingsForm> {
           sectionRow(
             Icons.lock_outline,
             'Access & pairing',
-            'Device access, paired devices and requests',
+            'Paired devices, permissions and requests',
             widget.onOwnerTools!,
           ),
         sectionRow(
@@ -1042,6 +1050,13 @@ class _SettingsFormState extends State<SettingsForm> {
           'MCP setup and diagnostics',
           () => showSection('Connections'),
         ),
+        if (widget.onAdvancedOwnerTools != null)
+          sectionRow(
+            Icons.tune,
+            'Advanced',
+            'Owner operations across hosts',
+            () => showSection('Advanced'),
+          ),
       ] else ...[
         Row(
           children: [
@@ -1105,6 +1120,11 @@ class _SettingsFormState extends State<SettingsForm> {
           ),
         ),
       ],
+      if (section == 'Advanced' && widget.onAdvancedOwnerTools != null)
+        OutlinedButton(
+          onPressed: saving ? null : widget.onAdvancedOwnerTools,
+          child: const Text('Owner operations'),
+        ),
       if (section == 'Services') ...[
         if (widget.onLocalServices != null) ...[
           const SizedBox(height: 12),

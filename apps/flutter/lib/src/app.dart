@@ -605,20 +605,39 @@ class _WispHomeState extends State<WispHome>
   Future<void> manage({BuildContext? from}) async {
     var remotes = machines.where((m) => m.data['local'] != true).toList();
     var pendingRequests = snapshot['pendingRequests'] as int? ?? 0;
+    var loading = false;
     await showWispSheet<void>(
       from ?? context,
       title: 'Paired devices',
       child: StatefulBuilder(
         builder: (pageContext, update) {
-          Future<void> openPage(Future<void> page) async {
-            await page;
-            if (!pageContext.mounted || !wispPageIsCurrent(pageContext)) return;
+          Future<void> refreshDevices() async {
+            if (loading) return;
+            if (!pageContext.mounted || !wispPageIsCurrent(pageContext)) {
+              return;
+            }
+            loading = true;
             try {
               final next = await backend.invoke('snapshot');
+              final owner = await backend.invoke('ownerStatus');
               if (!pageContext.mounted || !wispPageIsCurrent(pageContext)) {
                 return;
               }
-              final records = (next['hosts'] as Map).cast<String, dynamic>();
+              final records = Map<String, dynamic>.from(next['hosts'] as Map);
+              for (final client
+                  in (owner['host'] as Map?)?['clients'] as List? ?? []) {
+                final id = client['peer'] as String;
+                records.putIfAbsent(
+                  id,
+                  () => {
+                    'name': client['name'],
+                    'status':
+                        (owner['connected_peers'] as Map? ?? {}).containsKey(id)
+                        ? 'Connected'
+                        : 'Paired',
+                  },
+                );
+              }
               final order = next['order'] as Map? ?? {};
               update(() {
                 remotes = orderedIds(records.keys, order['machines'] as List?)
@@ -634,78 +653,86 @@ class _WispHomeState extends State<WispHome>
               });
             } catch (error) {
               notice('Cannot refresh paired devices: ${message(error)}');
+            } finally {
+              loading = false;
             }
           }
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (pendingRequests > 0)
-                OutlinedButton(
-                  onPressed: () {
-                    openPage(
-                      deviceSettings(
-                        section: 'Pairing requests',
-                        from: pageContext,
-                      ),
-                    );
-                  },
-                  child: Text(
-                    'Review $pendingRequests pairing ${pendingRequests == 1 ? 'request' : 'requests'}',
-                  ),
-                ),
-              for (final machine in remotes)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: WispPanel(
-                    padding: EdgeInsets.zero,
-                    child: WispListItem(
-                      leading: const Icon(
-                        Icons.computer,
-                        color: WispColors.cyan,
-                      ),
-                      title: Text('${machine.name} · ${shortId(machine.id)}'),
-                      titleStyle: const TextStyle(fontWeight: FontWeight.bold),
-                      subtitle: Text(
-                        machine.status,
-                        style: TextStyle(color: stateColor(machine)),
-                      ),
-                      onTap: () =>
-                          openPage(machineSettings(machine, from: pageContext)),
-                      actions: [
-                        WispSettingsButton(
-                          tooltip: 'Settings for ${machine.name}',
-                          onPressed: () => openPage(
-                            machineSettings(machine, from: pageContext),
-                          ),
+          Future<void> openPage(Future<void> page) async {
+            await page;
+            await refreshDevices();
+          }
+
+          return _PairedDevicesRefresh(
+            onRefresh: refreshDevices,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (pendingRequests > 0)
+                  OutlinedButton(
+                    onPressed: () {
+                      openPage(
+                        deviceSettings(
+                          section: 'Pairing requests',
+                          from: pageContext,
                         ),
-                      ],
+                      );
+                    },
+                    child: Text(
+                      'Review $pendingRequests pairing ${pendingRequests == 1 ? 'request' : 'requests'}',
                     ),
                   ),
+                for (final machine in remotes)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: WispPanel(
+                      padding: EdgeInsets.zero,
+                      child: WispListItem(
+                        leading: const Icon(
+                          Icons.computer,
+                          color: WispColors.cyan,
+                        ),
+                        title: Text('${machine.name} · ${shortId(machine.id)}'),
+                        titleStyle: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        subtitle: Text(
+                          machine.status,
+                          style: TextStyle(color: stateColor(machine)),
+                        ),
+                        onTap: () => openPage(
+                          machineSettings(machine, from: pageContext),
+                        ),
+                        actions: [
+                          WispSettingsButton(
+                            tooltip: 'Settings for ${machine.name}',
+                            onPressed: () => openPage(
+                              machineSettings(machine, from: pageContext),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                FilledButton(
+                  onPressed: () {
+                    openPage(pair(from: pageContext));
+                  },
+                  child: const Text('+ Pair another device'),
                 ),
-              FilledButton(
-                onPressed: () {
-                  openPage(pair(from: pageContext));
-                },
-                child: const Text('+ Pair another device'),
-              ),
-              const SizedBox(height: 8),
-              OutlinedButton(
-                onPressed: () => openPage(
-                  showPairingInvitation(pageContext, backend),
+                const SizedBox(height: 8),
+                OutlinedButton(
+                  onPressed: () =>
+                      openPage(showPairingInvitation(pageContext, backend)),
+                  child: const Text('Pair this device'),
                 ),
-                child: const Text('Pair this device'),
-              ),
-              TextButton(
-                onPressed: () => openPage(deviceSettings(from: pageContext)),
-                child: const Text('Device access'),
-              ),
-              const SizedBox(height: 16),
-              SelectableText(
-                'Device ID\n${snapshot['peer'] ?? ''}',
-                style: const TextStyle(fontSize: 12, color: WispColors.muted),
-              ),
-            ],
+                const SizedBox(height: 16),
+                SelectableText(
+                  'Device ID\n${snapshot['peer'] ?? ''}',
+                  style: const TextStyle(fontSize: 12, color: WispColors.muted),
+                ),
+              ],
+            ),
           );
         },
       ),
@@ -723,6 +750,17 @@ class _WispHomeState extends State<WispHome>
       child: MachineSettings(
         machine: machine,
         backend: backend,
+        permissions: ServiceSettings(
+          backend: backend,
+          android: snapshot['desktop'] != true,
+          host: snapshot['peer'] as String? ?? '',
+          devicePeer: machine.id,
+          showSectionSelector: false,
+          onChanged: () {
+            unawaited(poll());
+            unawaited(refresh());
+          },
+        ),
         onChanged: () {
           unawaited(poll());
           unawaited(refresh());
@@ -738,13 +776,14 @@ class _WispHomeState extends State<WispHome>
   }) async {
     await showWispSheet<void>(
       from ?? context,
-      title: servicesOnly ? 'Local services' : 'Device access',
+      title: servicesOnly ? 'Local services' : section,
       child: ServiceSettings(
         android: snapshot['desktop'] != true,
         host: snapshot['peer'] as String? ?? '',
         backend: backend,
         initialSection: section,
         servicesOnly: servicesOnly,
+        showSectionSelector: false,
         onChanged: () {
           unawaited(poll());
           unawaited(refresh());
@@ -808,6 +847,9 @@ class _WispHomeState extends State<WispHome>
           },
           onOwnerTools: () {
             manage(from: pageContext);
+          },
+          onAdvancedOwnerTools: () {
+            deviceSettings(section: 'Owner operations', from: pageContext);
           },
           onSaved: () {
             if (!pageContext.mounted || !wispPageIsCurrent(pageContext)) return;
@@ -1570,4 +1612,36 @@ class _WispHomeState extends State<WispHome>
           )
         : scaffold;
   }
+}
+
+class _PairedDevicesRefresh extends StatefulWidget {
+  const _PairedDevicesRefresh({required this.onRefresh, required this.child});
+  final Future<void> Function() onRefresh;
+  final Widget child;
+  @override
+  State<_PairedDevicesRefresh> createState() => _PairedDevicesRefreshState();
+}
+
+class _PairedDevicesRefreshState extends State<_PairedDevicesRefresh> {
+  Timer? timer;
+  @override
+  void initState() {
+    super.initState();
+    scheduleMicrotask(() {
+      if (mounted) unawaited(widget.onRefresh());
+    });
+    timer = Timer.periodic(
+      const Duration(seconds: 3),
+      (_) => unawaited(widget.onRefresh()),
+    );
+  }
+
+  @override
+  void dispose() {
+    timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

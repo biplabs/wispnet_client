@@ -77,6 +77,13 @@ The tray reports node availability, the active-client total (live connections or
 
 ## Flutter validation
 
+Settings → Access & pairing opens the single Paired devices list, including
+approved inbound clients without a saved remote-host entry. Pending requests
+appear at the top and refresh while the list is open. Each device's settings
+contains permissions for this machine's services and removal; changing one
+permission preserves pairing and other devices' grants. Owner operations across
+hosts are under Settings → Advanced → Owner operations.
+
 `scripts/test_flutter.sh` checks shared narrow/wide layouts, owner sheets,
 explicit grants/public-link confirmation, input retention, preference migration,
 cache provenance, stale-incarnation rejection, and a real isolated-node HTTP route.

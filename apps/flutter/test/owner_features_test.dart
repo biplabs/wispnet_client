@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -47,6 +48,39 @@ class DeferredOwnerBackend extends OwnerFeaturesBackend {
   }
 }
 
+class PermissionBackend extends OwnerFeaturesBackend {
+  PermissionBackend(super.android);
+
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method, [
+    Map<String, dynamic> arguments = const {},
+  ]) async {
+    final operation = arguments['payload']?['operation'];
+    if (method == 'ownerRequest' &&
+        const ['grant_service', 'revoke_service'].contains(operation?['op'])) {
+      if (operation['expected_revision'] != status['host']['revision']) {
+        throw const FormatException('Policy changed. Refresh and try again.');
+      }
+      final service = (status['host']['services'] as List).singleWhere(
+        (service) => service['id'] == operation['service'],
+      );
+      final allow = List<String>.from(service['allow'] as List);
+      if (operation['op'] == 'grant_service') {
+        allow.add(operation['peer'] as String);
+      } else {
+        allow.remove(operation['peer']);
+      }
+      service['allow'] = allow;
+      status['host']['revision']++;
+    }
+    final result = await super.invoke(method, arguments);
+    return method == 'ownerStatus'
+        ? jsonDecode(jsonEncode(result)) as Map<String, dynamic>
+        : result;
+  }
+}
+
 Future<void> tapHeader(WidgetTester tester, String tooltip) async {
   final button = find.byTooltip(tooltip).last;
   await tester.ensureVisible(button);
@@ -86,6 +120,77 @@ void main() {
   });
   for (final android in [false, true]) {
     final platform = android ? 'Android' : 'desktop';
+    testWidgets(
+      '$platform per-device permissions preserve other devices and reject stale revisions',
+      (tester) async {
+        final backend = PermissionBackend(android);
+        final service = (backend.status['host']['services'] as List).first;
+        final otherPeer = 'b' * 64;
+        (service['allow'] as List).add(otherPeer);
+        await mountOwner(tester, backend);
+        await fixture.openPairedDevices(tester);
+        await tester.tap(find.byTooltip('Settings for j-strix'));
+        await tester.pumpAndSettle();
+        final toggle = find.descendant(
+          of: find.byType(ServiceSettings),
+          matching: find.text('web'),
+        );
+        await tester.ensureVisible(toggle);
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(service['allow'], [otherPeer]);
+        expect(backend.ownerCalls.single['operation'], {
+          'op': 'revoke_service',
+          'service': 'web',
+          'peer': fixture.peer,
+          'expected_revision': 7,
+        });
+        backend.status['host']['revision']++;
+        await tester.tap(toggle);
+        await tester.pumpAndSettle();
+        expect(
+          find.text('Policy changed. Refresh and try again.'),
+          findsOneWidget,
+        );
+        expect(service['allow'], [otherPeer]);
+        expect(tester.takeException(), isNull);
+        await fixture.close(tester);
+      },
+    );
+
+    testWidgets('$platform inbound-only approved devices remain manageable', (
+      tester,
+    ) async {
+      final backend = OwnerFeaturesBackend(android)..paired = false;
+      await mountOwner(tester, backend);
+      await fixture.openPairedDevices(tester);
+      expect(find.text('Existing device · aaaaaaaa'), findsOneWidget);
+      await tester.ensureVisible(
+        find.byTooltip('Settings for Existing device'),
+      );
+      await tester.tap(find.byTooltip('Settings for Existing device'));
+      await tester.pumpAndSettle();
+      expect(find.text('Service permissions'), findsOneWidget);
+      expect(find.widgetWithText(OutlinedButton, 'Remove'), findsOneWidget);
+      await fixture.close(tester);
+    });
+
+    testWidgets('$platform owner operations are under advanced settings', (
+      tester,
+    ) async {
+      final backend = OwnerFeaturesBackend(android);
+      await mountOwner(tester, backend);
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Advanced'));
+      await tester.tap(find.text('Advanced'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Owner operations'));
+      await tester.pumpAndSettle();
+      expect(find.text('No saved owner operations.'), findsOneWidget);
+      expect(find.byType(DropdownButton<String>), findsNothing);
+      await fixture.close(tester);
+    });
     testWidgets(
       '$platform owner title is specific, Back returns to Settings and X closes the popup',
       (tester) async {
@@ -248,21 +353,24 @@ void main() {
     );
 
     testWidgets(
-      '$platform paired devices links to local access and issues a pairing QR',
+      '$platform paired devices consolidates permissions and issues a pairing QR',
       (tester) async {
         final backend = OwnerFeaturesBackend(android);
         await mountOwner(tester, backend);
         await fixture.openPairedDevices(tester);
-        final access = find.widgetWithText(TextButton, 'Device access');
-        await tester.ensureVisible(access);
-        await tester.tap(access);
+        expect(find.text('Device access'), findsNothing);
+        await tester.tap(find.byTooltip('Settings for j-strix'));
         await tester.pumpAndSettle();
         final settings = tester.widget<ServiceSettings>(
           find.byType(ServiceSettings),
         );
         expect(settings.android, android);
-        expect(settings.initialSection, 'Devices');
-        expect(find.text('Existing device'), findsOneWidget);
+        expect(settings.devicePeer, fixture.peer);
+        expect(find.text('Service permissions'), findsOneWidget);
+        expect(
+          find.text('Allow this device to use services on this machine.'),
+          findsOneWidget,
+        );
         await tapHeader(tester, 'Back');
         await tester.ensureVisible(find.text('Pair this device'));
         await tester.tap(find.text('Pair this device'));
