@@ -665,11 +665,15 @@ void main() {
     expect(find.text('tcp://127.0.0.1:18356'), findsOneWidget);
     expect(find.text('wispnet://$peer/embeddings'), findsOneWidget);
     expect(
-      find.textContaining('Other devices get their own local address'),
+      find.text(
+        'Connect apps on this device. Available while Wispnet is online.',
+      ),
       findsOneWidget,
     );
     expect(
-      find.textContaining('Wispnet resolves it to a local address'),
+      find.text(
+        'Permanent link to this service. Requires an app that supports Wispnet links and access to the host.',
+      ),
       findsOneWidget,
     );
     expect(
