@@ -822,7 +822,6 @@ class _ServiceSettingsState extends State<ServiceSettings> {
 
   Widget serviceItem(Map<String, dynamic> service) => WispServiceItem(
     key: ValueKey('local-service-${service['id']}'),
-    contentPadding: EdgeInsets.zero,
     title: service['id'] as String,
     kind: service['kind'] as String,
     subtitle: Align(
@@ -940,10 +939,13 @@ class _ServiceSettingsState extends State<ServiceSettings> {
                   s['kind'] != 'files' ||
                   (status!['host']['file_exports'] as Map? ?? {}).isNotEmpty,
             ))
-              serviceItem(s),
-            const SizedBox(height: 12),
-            const Divider(color: WispColors.border),
-            const SizedBox(height: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: WispPanel(
+                  padding: EdgeInsets.zero,
+                  child: serviceItem(s),
+                ),
+              ),
             WispCreateButton(
               key: const ValueKey('share-service'),
               label: 'Share a service',
