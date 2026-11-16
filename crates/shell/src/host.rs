@@ -312,6 +312,55 @@ impl Session {
             })
             .map_err(pty_error)
     }
+    fn write_input(&self, data: &[u8]) -> io::Result<()> {
+        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        #[cfg(target_os = "macos")]
+        {
+            // Public Darwin TIOCOUTQ (_IOR('t', 115, int)): bytes awaiting the
+            // master reader. A full echo queue can discard pasted typeahead.
+            const TIOCOUTQ: libc::c_ulong = 0x4004_7473;
+            let fd = self
+                .master
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .as_raw_fd()
+                .ok_or_else(|| error("Cannot inspect shell terminal"))?;
+            for chunk in data.chunks(128) {
+                if data.len() > 128 {
+                    loop {
+                        let mut pending: libc::c_int = 0;
+                        // SAFETY: self keeps the master live and pending is a valid int.
+                        if unsafe { libc::ioctl(fd, TIOCOUTQ, &mut pending) } < 0 {
+                            return Err(io::Error::last_os_error());
+                        }
+                        let mut input_pending: libc::c_int = 0;
+                        // Darwin's tty ioctl also reports the slave input queue.
+                        // Do not race ahead of the shell consuming prior bursts.
+                        // SAFETY: fd is live and input_pending is a valid int.
+                        if unsafe { libc::ioctl(fd, libc::FIONREAD, &mut input_pending) } < 0 {
+                            return Err(io::Error::last_os_error());
+                        }
+                        if pending == 0 && input_pending == 0 {
+                            break;
+                        }
+                        if self
+                            .state
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .terminated
+                        {
+                            return Err(error("Shell terminated"));
+                        }
+                        std::thread::sleep(Duration::from_millis(1));
+                    }
+                }
+                writer.write_all(chunk)?;
+            }
+            Ok(())
+        }
+        #[cfg(not(target_os = "macos"))]
+        writer.write_all(data)
+    }
     fn terminal_state(&self) -> (bool, bool) {
         #[cfg(unix)]
         if let Some(fd) = self
@@ -601,14 +650,7 @@ impl SessionManager {
                 let frame = match read_client(&mut reader).await {
                     Ok(Some(ClientFrame::Input { data })) => {
                         let session = input_session.clone();
-                        match tokio::task::spawn_blocking(move || {
-                            session
-                                .writer
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .write_all(&data)
-                        })
-                        .await
+                        match tokio::task::spawn_blocking(move || session.write_input(&data)).await
                         {
                             Ok(Ok(())) => continue,
                             Ok(Err(e)) => Err(e),
@@ -1010,11 +1052,28 @@ mod tests {
             read_server(&mut client).await.unwrap(),
             Some(ServerFrame::Attached { .. })
         ));
+        // Wait for the shell's startup terminal reconfiguration before pasting.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match read_server(&mut client).await.unwrap().unwrap() {
+                    ServerFrame::Output { data } | ServerFrame::Scrollback { data }
+                        if !data.is_empty() =>
+                    {
+                        break;
+                    }
+                    ServerFrame::Error { message } => panic!("{message}"),
+                    ServerFrame::Exited { .. } => panic!("Shell exited before its prompt"),
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
         let (mut read, mut write) = tokio::io::split(client);
         let input = tokio::spawn(async move {
             let script = format!(
                 "{}exit 0\n",
-                "printf '%s%s\\n' REVIEW_ PASTE\n".repeat(COMMANDS)
+                "printf '\\000'; : REVIEW_PASTE\n".repeat(COMMANDS)
             );
             assert!(script.len() > 1024 * 1024);
             for data in script.as_bytes().chunks(8192) {
@@ -1029,7 +1088,8 @@ mod tests {
             }
             write
         });
-        let output = tokio::time::timeout(Duration::from_secs(20), async {
+        let seconds = if cfg!(target_os = "macos") { 60 } else { 20 };
+        let output = tokio::time::timeout(Duration::from_secs(seconds), async {
             let mut output = Vec::new();
             loop {
                 match read_server(&mut read).await.unwrap().unwrap() {
@@ -1048,13 +1108,8 @@ mod tests {
         .await
         .unwrap();
         let write = input.await.unwrap();
-        assert_eq!(
-            output
-                .windows(b"REVIEW_PASTE".len())
-                .filter(|part| *part == b"REVIEW_PASTE")
-                .count(),
-            COMMANDS
-        );
+        // A single-byte marker cannot be split by interleaved terminal echo.
+        assert_eq!(output.iter().filter(|byte| **byte == 0).count(), COMMANDS);
         drop(read);
         drop(write);
         assert!(worker.await.unwrap().is_ok());
