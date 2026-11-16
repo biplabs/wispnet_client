@@ -21,7 +21,11 @@ pub(super) struct Binding {
 }
 impl Binding {
     pub fn authority(&self) -> String {
-        format!("{}:{}", self.hostname, self.port)
+        #[cfg(target_os = "ios")]
+        let hostname = "127.0.0.1";
+        #[cfg(not(target_os = "ios"))]
+        let hostname = self.hostname.as_str();
+        format!("{}:{}", hostname, self.port)
     }
     pub fn url(&self) -> String {
         format!("http://{}/", self.authority())

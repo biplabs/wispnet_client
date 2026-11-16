@@ -158,7 +158,9 @@ class _WispHomeState extends State<WispHome>
         notice(network);
       }
       lastNetwork = network;
-      desktopShells.android = next['desktop'] != true;
+      desktopShells.android =
+          next['desktop'] != true && next['platform'] != 'ios';
+      desktopShells.touchInput = next['platform'] == 'ios';
       if (desktopShells.android && next['enabled'] == true) {
         final saved = next['terminal_layout'] as Map?;
         desktopShells.restoreLayout(
@@ -370,19 +372,21 @@ class _WispHomeState extends State<WispHome>
       child: DesktopTerminalSheet(
         manager: desktopShells,
         workspace: workspace,
-        onOpenExternal: (pane) async {
-          try {
-            await backend.invoke('openShell', {
-              'host': pane.host,
-              'host_name': pane.hostName,
-              'service': pane.service,
-              'incarnation': pane.incarnation,
-              'session': pane.session,
-            });
-          } catch (error) {
-            notice('Cannot open terminal: ${message(error)}');
-          }
-        },
+        onOpenExternal: snapshot['platform'] == 'ios'
+            ? null
+            : (pane) async {
+                try {
+                  await backend.invoke('openShell', {
+                    'host': pane.host,
+                    'host_name': pane.hostName,
+                    'service': pane.service,
+                    'incarnation': pane.incarnation,
+                    'session': pane.session,
+                  });
+                } catch (error) {
+                  notice('Cannot open terminal: ${message(error)}');
+                }
+              },
       ),
     );
     if (workspace.tabs.isNotEmpty) {
@@ -406,6 +410,7 @@ class _WispHomeState extends State<WispHome>
             ? 'Send files to ${machine.name}'
             : 'Send files to ${machine.name} / ${service['id']}',
         child: FileSendSheet(
+          localPaths: snapshot['platform'] == 'ios',
           backend: backend,
           machine: machine,
           incarnation: service['incarnation'] as String,

@@ -1,7 +1,7 @@
 [workspace]
 members = ["crates/files", "crates/shell", "crates/ssh-adapter", "crates/core", "crates/agent", "crates/registry", "apps/node/cli", "apps/flutter/android/native", "crates/client", "apps/node/daemon", "tools/build-info"]
 resolver = "3"
-exclude = ["vendor/iroh", "vendor/noq-proto"]
+exclude = ["vendor/iroh", "vendor/noq-proto", "vendor/netdev", "vendor/netwatch"]
 
 [workspace.package]
 license = "Apache-2.0"
@@ -30,3 +30,5 @@ libc = "=0.2.190"
 [patch.crates-io]
 iroh = { path = "vendor/iroh" }
 noq-proto = { path = "vendor/noq-proto" }
+netdev = { path = "vendor/netdev" }
+netwatch = { path = "vendor/netwatch" }

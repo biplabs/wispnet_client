@@ -5,3 +5,4 @@ analyzer:
     - android/**
     - macos/**
     - linux/**
+    - ios/**

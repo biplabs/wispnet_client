@@ -214,9 +214,9 @@ fn quic_config(streams: usize) -> QuicTransportConfig {
         .build()
 }
 
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 type ShellSessions = wispnet_shell::SessionManager;
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 #[derive(Clone, Default)]
 struct ShellSessions;
 
@@ -487,7 +487,7 @@ async fn serve(
                 // coalesced by watch, so no pre-pause connection survives.
                 tasks.abort_all();
                 while tasks.join_next().await.is_some() {}
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 if !*services_enabled.borrow()
                     && let Services::Host(_, sessions, _) = &services {
                     sessions.retain_scopes(|_| false);
@@ -507,7 +507,7 @@ async fn serve(
                 }
             },
             _ = shell_policy_tick.tick() => {
-                #[cfg(not(target_os = "android"))]
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 if let Services::Host(_, sessions, _) = &services {
                     // Disconnected phones no longer have a stream monitor. The
                     // host still owns their PTYs and rechecks durable authority.
@@ -679,9 +679,9 @@ async fn serve_stream(
         counts.record_activity(peer);
         // This is deliberately after parsing + authenticating + checking the host-local grant.
         let backend = if service.kind == wispnet_core::host::ServiceKind::Shell {
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             return Err(Status::BackendUnavailable);
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             None
         } else if matches!(
             service.kind,
@@ -746,7 +746,7 @@ async fn serve_stream(
         }
     };
     if kind == wispnet_core::host::ServiceKind::Shell {
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         if let Services::Host(_, sessions, _) = services {
             let scope = format!("{incarnation}/{peer}");
             tokio::select! {

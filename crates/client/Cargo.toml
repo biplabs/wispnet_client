@@ -8,7 +8,7 @@ publish.workspace = true
 
 [lib]
 name = "wispnet_client"
-crate-type = ["rlib"]
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 serde.workspace = true
@@ -35,7 +35,7 @@ hyper-util = { version = "=0.1.21", features = ["tokio"] }
 http-body-util = "=0.1.5"
 bytes = "=1.12.1"
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 wispnet-shell = { path = "../shell", features = ["host"] }
 
 [dev-dependencies]

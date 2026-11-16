@@ -22,11 +22,11 @@ pub(crate) struct Shells {
     sessions: Mutex<BTreeMap<String, Arc<Session>>>,
     slots: Arc<tokio::sync::Semaphore>,
     pub(crate) execs: crate::shell_exec::ExecRegistry,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     pub(crate) local: wispnet_shell::SessionManager,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     local_scopes: Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
     local_cancel: watch::Sender<bool>,
 }
 impl Default for Shells {
@@ -35,18 +35,18 @@ impl Default for Shells {
             sessions: Mutex::new(BTreeMap::new()),
             slots: Arc::new(tokio::sync::Semaphore::new(16)),
             execs: Default::default(),
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             local: wispnet_shell::SessionManager::default(),
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             local_scopes: Arc::new(std::sync::Mutex::new(std::collections::BTreeSet::new())),
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             local_cancel: watch::channel(false).0,
         }
     }
 }
 impl Drop for Shells {
     fn drop(&mut self) {
-        #[cfg(not(target_os = "android"))]
+        #[cfg(not(any(target_os = "android", target_os = "ios")))]
         {
             let _ = self.local_cancel.send(true);
         }
@@ -103,11 +103,11 @@ impl Client {
         let mut local_worker: Option<tokio::task::JoinHandle<()>> = None;
         let mut stream: BoxStream;
         if host == self.endpoint.id() {
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             {
                 return Err("Shell hosting is available on desktop computers".into());
             }
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 connection = None;
                 let authority = self

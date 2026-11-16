@@ -3,6 +3,8 @@ pub mod access_settings;
 mod connections;
 pub mod files;
 pub mod gateway;
+#[cfg(any(target_os = "ios", test))]
+mod ios;
 mod mcp;
 mod owner;
 pub mod public_access;

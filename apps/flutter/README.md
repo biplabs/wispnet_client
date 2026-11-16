@@ -1,6 +1,6 @@
 # Wispnet Flutter UI
 
-Desktop is the UI standard for every platform. Android and desktop use the same
+Desktop is the UI standard for every platform. Android, iOS and desktop use the same
 Flutter pages for the home screen, paired machines, machine settings, pairing,
 device settings, service links, service management, folder editors, sending files,
 browsing shared files, and transfer progress. Responsive layouts adapt that page
@@ -26,7 +26,7 @@ The remaining differences are native platform integrations, not alternate pages:
   Only desktop can hand a session to an installed external terminal application.
 - Pairing uses the same QR and code tabs. QR-image import works everywhere. The
   camera action depends on actual camera availability. The shared camera page
-  receives frames from Android Camera2, Linux V4L2/FFmpeg, or macOS AVFoundation.
+  receives frames from Android Camera2, Linux V4L2/FFmpeg, or Apple AVFoundation.
 - Diagnostics uses the same page and probe on every platform. Device-specific
   network/VPN observations are reported when available; unknown fields remain
   unavailable rather than being guessed. The device itself is not probed as a
@@ -54,7 +54,9 @@ preserves its draft, while X dismisses the entire popup flow. Save and Cancel
 return from the current form.
 
 The macOS runner and installer use these widgets too, but require native build
-and runtime validation on a Mac. Windows/iOS node adapters are not implemented.
+and runtime validation on a Mac. The iOS runner embeds the same Rust client for iPhone and iPad; see
+[`docs/ios-app.md`](../../docs/ios-app.md) for builds and platform behavior.
+The Windows node adapter is not implemented.
 
 ## Build and run
 

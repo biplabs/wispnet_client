@@ -1208,6 +1208,7 @@ class DesktopShellManager extends ChangeNotifier {
   DesktopShellManager(this.backend);
   final WispnetBackend backend;
   bool android = false;
+  bool touchInput = false;
   final Map<String, HostShellWorkspace> _workspaces = {};
   DesktopInputMode _inputMode = DesktopInputMode.predictive;
   bool _restored = false;
@@ -1366,12 +1367,12 @@ class DesktopTerminalSheet extends StatefulWidget {
     super.key,
     required this.manager,
     required this.workspace,
-    required this.onOpenExternal,
+    this.onOpenExternal,
   });
 
   final DesktopShellManager manager;
   final HostShellWorkspace workspace;
-  final Future<void> Function(DesktopShellPane pane) onOpenExternal;
+  final Future<void> Function(DesktopShellPane pane)? onOpenExternal;
 
   @override
   State<DesktopTerminalSheet> createState() => _DesktopTerminalSheetState();
@@ -1383,6 +1384,8 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
   bool _popped = false;
   final TextEditingController _lineController = TextEditingController();
   final FocusNode _lineFocus = FocusNode();
+  String _touchDraft = '';
+  DesktopShellPane? _inputPane;
 
   HostShellWorkspace get workspace => widget.workspace;
 
@@ -1390,6 +1393,7 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
   void initState() {
     super.initState();
     workspace.addListener(_onWorkspaceChanged);
+    _inputPane = workspace.activePane;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && workspace.tabs.isNotEmpty) {
         workspace.activePane.focusNode.requestFocus();
@@ -1425,6 +1429,11 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
       widget.manager.closeHost(workspace.host, terminate: false);
       _popSheet();
       return;
+    }
+    if (_inputPane != workspace.activePane) {
+      _inputPane = workspace.activePane;
+      _touchDraft = '';
+      _lineController.clear();
     }
     setState(() {});
   }
@@ -1573,13 +1582,15 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
             icon: Icons.horizontal_split_outlined,
             onTap: () => workspace.splitActivePane(Axis.vertical),
           ),
-          const SizedBox(width: 6),
-          _HeaderCircleButton(
-            key: const ValueKey('desktop-shell-open-external'),
-            tooltip: 'Open in system terminal',
-            icon: Icons.open_in_new,
-            onTap: () => unawaited(widget.onOpenExternal(pane)),
-          ),
+          if (widget.onOpenExternal != null) ...[
+            const SizedBox(width: 6),
+            _HeaderCircleButton(
+              key: const ValueKey('desktop-shell-open-external'),
+              tooltip: 'Open in system terminal',
+              icon: Icons.open_in_new,
+              onTap: () => unawaited(widget.onOpenExternal!(pane)),
+            ),
+          ],
         ],
         const SizedBox(width: 6),
         _HeaderCircleButton(
@@ -1742,7 +1753,8 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                     onKeyboardRequest: _lineFocus.requestFocus,
                   ),
                 ),
-                if (effectiveMode == DesktopInputMode.line) ...[
+                if (effectiveMode == DesktopInputMode.line ||
+                    widget.manager.touchInput) ...[
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -1751,6 +1763,35 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                           key: const ValueKey('desktop-shell-line-input'),
                           controller: _lineController,
                           focusNode: _lineFocus,
+                          textInputAction: TextInputAction.send,
+                          autocorrect: effectiveMode == DesktopInputMode.line,
+                          enableSuggestions:
+                              effectiveMode == DesktopInputMode.line,
+                          smartDashesType: SmartDashesType.disabled,
+                          smartQuotesType: SmartQuotesType.disabled,
+                          onChanged: (value) {
+                            if (widget.manager.touchInput &&
+                                effectiveMode != DesktopInputMode.line) {
+                              final before = _touchDraft.runes.toList(),
+                                  after = value.runes.toList();
+                              var common = 0;
+                              while (common < before.length &&
+                                  common < after.length &&
+                                  before[common] == after[common]) {
+                                common++;
+                              }
+                              final input =
+                                  List.filled(
+                                    before.length - common,
+                                    '\u007f',
+                                  ).join() +
+                                  String.fromCharCodes(after.skip(common));
+                              if (input.isNotEmpty) {
+                                unawaited(pane.sendInput(input));
+                              }
+                            }
+                            _touchDraft = value;
+                          },
                           style: const TextStyle(
                             fontFamily: 'monospace',
                             fontSize: 14,
@@ -1760,8 +1801,16 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                             isDense: true,
                           ),
                           onSubmitted: (value) {
-                            unawaited(pane.sendInput('$value\r'));
+                            unawaited(
+                              pane.sendInput(
+                                widget.manager.touchInput &&
+                                        effectiveMode != DesktopInputMode.line
+                                    ? '\r'
+                                    : '$value\r',
+                              ),
+                            );
                             _lineController.clear();
+                            _touchDraft = '';
                           },
                         ),
                       ),
@@ -1769,16 +1818,22 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                       FilledButton(
                         onPressed: () {
                           unawaited(
-                            pane.sendInput('${_lineController.text}\r'),
+                            pane.sendInput(
+                              widget.manager.touchInput &&
+                                      effectiveMode != DesktopInputMode.line
+                                  ? '\r'
+                                  : '${_lineController.text}\r',
+                            ),
                           );
                           _lineController.clear();
+                          _touchDraft = '';
                         },
                         child: const Text('Send'),
                       ),
                     ],
                   ),
                 ],
-                if (pane.android) ...[
+                if (pane.android || widget.manager.touchInput) ...[
                   const SizedBox(height: 4),
                   // Shortcut keys bar
                   SingleChildScrollView(
@@ -1797,7 +1852,13 @@ class _DesktopTerminalSheetState extends State<DesktopTerminalSheet> {
                         ])
                           TextButton(
                             onPressed: pane.state == ShellPaneState.attached
-                                ? () => unawaited(pane.sendInput(entry.$2))
+                                ? () {
+                                    unawaited(pane.sendInput(entry.$2));
+                                    if (widget.manager.touchInput) {
+                                      _lineController.clear();
+                                      _touchDraft = '';
+                                    }
+                                  }
                                 : null,
                             child: Text(entry.$1),
                           ),

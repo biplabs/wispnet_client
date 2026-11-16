@@ -249,9 +249,9 @@ impl Client {
         resources: &mut Resources,
     ) -> Result<BoxStream, String> {
         if host == self.endpoint.id() {
-            #[cfg(target_os = "android")]
+            #[cfg(any(target_os = "android", target_os = "ios"))]
             return Err("Shell hosting is available on desktop computers".into());
-            #[cfg(not(target_os = "android"))]
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             {
                 let authority = self
                     .local_authority

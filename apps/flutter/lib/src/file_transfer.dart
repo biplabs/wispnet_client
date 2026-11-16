@@ -531,6 +531,7 @@ class FileSendSheet extends StatefulWidget {
     this.initialFiles = const [],
     this.onQueued,
     this.desktop = true,
+    this.localPaths = false,
   });
   final WispnetBackend backend;
   final Machine machine;
@@ -539,7 +540,7 @@ class FileSendSheet extends StatefulWidget {
   final List<String> initialPaths;
   final List<Map<String, dynamic>> initialFiles;
   final ValueChanged<List<DesktopFileTransfer>>? onQueued;
-  final bool desktop;
+  final bool desktop, localPaths;
   @override
   State<FileSendSheet> createState() => _FileSendSheetState();
 }
@@ -576,7 +577,9 @@ class _FileSendSheetState extends State<FileSendSheet> {
       final path = entry['path'] as String?;
       final name = entry['name'] as String?;
       if (path == null ||
-          Uri.tryParse(path)?.scheme != 'content' ||
+          (widget.localPaths
+              ? !File(path).isAbsolute
+              : Uri.tryParse(path)?.scheme != 'content') ||
           name == null ||
           name.isEmpty ||
           name == '.' ||

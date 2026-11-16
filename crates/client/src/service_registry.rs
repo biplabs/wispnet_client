@@ -530,7 +530,10 @@ mod tests {
             acknowledgement.starts_with("HTTP/1.1 200"),
             "{acknowledgement}"
         );
-        assert!(acknowledgement.contains("\"isError\":false"));
+        assert!(
+            acknowledgement.contains("\"isError\":false"),
+            "{acknowledgement}"
+        );
         assert!(!state.path().join("mcp-token").exists());
         let moved = client
             .command(&json!({"op":"resolve_link","link":link}))

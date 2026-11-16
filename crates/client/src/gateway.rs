@@ -21,9 +21,17 @@ mod store;
 // Reserved only to strip obsolete Wispnet credentials from legacy browser cookies.
 const COOKIE: &str = "_wispnet_session";
 struct Worker {
+    #[cfg(target_os = "ios")]
+    listener: JoinHandle<()>,
     binding: store::Binding,
     cancel: tokio::sync::watch::Sender<()>,
     route: Arc<Route>,
+}
+#[cfg(target_os = "ios")]
+impl Drop for Worker {
+    fn drop(&mut self) {
+        self.listener.abort();
+    }
 }
 pub struct Gateways {
     enabled: AtomicBool,
@@ -118,6 +126,11 @@ impl Gateways {
         if let Some(task) = self.registry.lock().await.take() {
             task.abort();
             let _ = task.await;
+        }
+        #[cfg(target_os = "ios")]
+        for worker in guard.iter_mut() {
+            worker.listener.abort();
+            let _ = (&mut worker.listener).await;
         }
         guard.clear();
         interrupted
@@ -245,19 +258,44 @@ impl Gateways {
         }
         let aliases = Vec::new();
         let settings = crate::access_settings::Settings::load(&client.state)?;
+        #[cfg(not(target_os = "ios"))]
         let port = settings.registry_port;
+        // iOS cannot install .localhost DNS aliases. Reserve one numeric-loopback
+        // port per service to retain browser origin isolation without DNS changes.
+        #[cfg(target_os = "ios")]
+        let port = old.map(|binding| binding.port).unwrap_or(0);
+        #[cfg(target_os = "ios")]
+        let _ = settings;
         if let Some(worker) = workers.iter().find(|w| {
             w.binding.peer == peer
                 && w.binding.service == service
                 && w.binding.incarnation == incarnation
                 && w.binding.hostname == hostname
-                && w.binding.port == port
+                && (w.binding.port == port || port == 0)
         }) {
             return Ok(worker.binding.url());
         }
 
         // Dropping the cancellation sender terminates streams of a replaced route.
+        #[cfg(not(target_os = "ios"))]
         workers.retain(|w| w.binding.peer != peer || w.binding.service != service);
+        #[cfg(target_os = "ios")]
+        for index in (0..workers.len()).rev() {
+            if workers[index].binding.peer == peer && workers[index].binding.service == service {
+                let mut worker = workers.remove(index);
+                worker.listener.abort();
+                let _ = (&mut worker.listener).await;
+            }
+        }
+        #[cfg(target_os = "ios")]
+        let listener = TcpListener::bind(("127.0.0.1", port))
+            .await
+            .map_err(|_| "Saved service port unavailable")?;
+        #[cfg(target_os = "ios")]
+        let port = listener
+            .local_addr()
+            .map_err(|_| "Cannot inspect service port")?
+            .port();
         let binding = store::Binding {
             peer,
             service,
@@ -297,6 +335,9 @@ impl Gateways {
             service: binding.service.clone(),
             incarnation: binding.incarnation.clone(),
             local_binding,
+            #[cfg(target_os = "ios")]
+            authorities: vec![binding.authority()],
+            #[cfg(not(target_os = "ios"))]
             authorities: binding
                 .names()
                 .map(|name| format!("{}:{}", name, binding.port))
@@ -305,7 +346,42 @@ impl Gateways {
         });
         let (cancel, _) = tokio::sync::watch::channel(());
         let url = binding.url();
+        #[cfg(target_os = "ios")]
+        let listener = {
+            let route = route.clone();
+            let mut cancelled = cancel.subscribe();
+            tokio::spawn(async move {
+                loop {
+                    tokio::select! {
+                        _ = cancelled.changed() => break,
+                        accepted = listener.accept() => {
+                            let Ok((mut socket, _)) = accepted else { break };
+                            let Ok(permit) = route.client.gateway.connections.clone().try_acquire_owned() else { continue };
+                            let route = route.clone();
+                            let mut cancelled = cancelled.clone();
+                            tokio::spawn(async move {
+                                let _permit = permit;
+                                tokio::select! {
+                                    _ = cancelled.changed() => {},
+                                    _ = async {
+                                        if let Ok(request) = headers(&mut socket).await.and_then(|bytes| parse(&bytes)) {
+                                            if route.authorities.iter().any(|authority| request.safe(authority)) {
+                                                let _ = route.handle(socket, request).await;
+                                            } else {
+                                                let _ = response(&mut socket, "421 Misdirected Request", "Unknown local authority", "").await;
+                                            }
+                                        }
+                                    } => {},
+                                }
+                            });
+                        }
+                    }
+                }
+            })
+        };
         workers.push(Worker {
+            #[cfg(target_os = "ios")]
+            listener,
             binding,
             cancel,
             route,

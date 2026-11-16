@@ -24,6 +24,83 @@ class _Backend implements WispnetBackend {
 }
 
 void main() {
+  testWidgets('touch Flutter terminal sends typing, edits and control keys', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final backend = _Backend();
+    final manager = DesktopShellManager(backend)..touchInput = true;
+    final workspace = manager.openHost(
+      host: 'host',
+      hostName: 'Computer',
+      service: 'shell',
+      incarnation: 'test',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wispTheme(),
+        home: Scaffold(
+          body: DesktopTerminalSheet(manager: manager, workspace: workspace),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final input = find.byKey(const ValueKey('desktop-shell-line-input'));
+    expect(find.byType(AndroidView), findsNothing);
+    await tester.enterText(input, 'ls');
+    await tester.pump();
+    expect(backend.input.join(), 'ls');
+    await tester.enterText(input, 'l');
+    await tester.pump();
+    expect(backend.input.last, '\u007f');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pump();
+    expect(backend.input.last, '\r');
+    await tester.tap(find.text('Ctrl-C'));
+    await tester.pump();
+    expect(backend.input.last, '\u0003');
+    expect(tester.takeException(), isNull);
+    manager.closeHost('host');
+    await tester.pumpWidget(const SizedBox.shrink());
+    manager.dispose();
+  });
+
+  testWidgets('Flutter terminal can omit an unavailable external terminal', (
+    tester,
+  ) async {
+    final manager = DesktopShellManager(_Backend());
+    final workspace = manager.openHost(
+      host: 'host',
+      hostName: 'Computer',
+      service: 'shell',
+      incarnation: 'test',
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: wispTheme(),
+        home: Scaffold(
+          body: DesktopTerminalSheet(manager: manager, workspace: workspace),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(AndroidView), findsNothing);
+    expect(
+      find.byKey(const ValueKey('desktop-shell-open-external')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('desktop-shell-split-horizontal')),
+      findsOneWidget,
+    );
+    manager.closeHost('host');
+    await tester.pumpWidget(const SizedBox.shrink());
+    manager.dispose();
+  });
+
   testWidgets('desktop hides touch keys and copies mouse-selected output', (
     tester,
   ) async {
