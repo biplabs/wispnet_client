@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Opt-in two-host recreation test; desktop.home stays headless, relay stays up.
+"""Opt-in two-host recreation test; the selected remote stays headless, relay stays up.
 
 Uses existing reciprocal pins/approvals and each host's website backend. Only
 temporary service registrations are mutated. Restarts both nodes, never the relay.
 """
 
+import argparse
 import json
 import shlex
 import subprocess
@@ -12,10 +13,27 @@ import sys
 import time
 import uuid
 
-SSH = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "desktop.home"]
+SSH = []
+NODE = {}
+
+
+def configure(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--ssh-host", required=True, help="Trusted SSH alias for the headless Linux host")
+    parser.add_argument("--local-node", required=True, help="Local installed wispnet-node executable")
+    parser.add_argument("--remote-node", required=True, help="Remote installed wispnet-node executable")
+    args = parser.parse_args(argv)
+    if args.ssh_host.startswith("-") or not all(c.isalnum() or c in ".-_@" for c in args.ssh_host):
+        parser.error("--ssh-host must be a trusted SSH alias or user@host")
+    SSH[:] = ["ssh", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", args.ssh_host]
+    NODE.update({False: args.local_node, True: args.remote_node})
+    return args
+
 
 
 def execute(remote, args, data=None, check=True):
+    if not SSH or not NODE:
+        raise RuntimeError("Select hosts with configure() before running installed-node acceptance")
     return subprocess.run(
         SSH + [shlex.join(list(map(str, args)))] if remote else args,
         input=data,
@@ -28,7 +46,7 @@ def execute(remote, args, data=None, check=True):
 
 def request(remote, value, ok=True):
     result = execute(
-        remote, ["/home/johnny/.local/bin/wispnet-node"], json.dumps(value), check=False
+        remote, [NODE[remote]], json.dumps(value), check=False
     )
     if (result.returncode == 0) != ok:
         raise RuntimeError("Unexpected owner-local node result: " + result.stderr)
@@ -100,6 +118,7 @@ def restart(remote):
 
 
 def main():
+    configure()
     baseline = {remote: snapshot(remote) for remote in [False, True]}
     fixture = "recreation-" + uuid.uuid4().hex[:12]
     relay_pid = execute(
@@ -181,7 +200,7 @@ def main():
             mutate(target, {"op": "remove", "id": fixture})
             request(source, {"op": "stop"})
             print(
-                f"{'local → headless Ubuntu' if target else 'headless Ubuntu → local'}: stale listing/session denied, unbound Open denied, incarnation survived target restart, fresh Open HTTP 200"
+                f"{'local → remote host' if target else 'remote host → local'}: stale listing/session denied, unbound Open denied, incarnation survived target restart, fresh Open HTTP 200"
             )
     finally:
         for remote in [False, True]:
@@ -226,7 +245,7 @@ def main():
         == "not-found"
     )
     print(
-        "Fixture services removed; existing host identities/generations, services/incarnations, approvals/grants and pins preserved; relay PID unchanged; desktop.home remained headless"
+        "Fixture services removed; existing host identities/generations, services/incarnations, approvals/grants and pins preserved; relay PID unchanged; selected remote remained headless"
     )
 
 

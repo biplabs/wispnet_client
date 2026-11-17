@@ -892,6 +892,7 @@ fn app_transport_config(value: &Value) -> Result<TransportConfig, String> {
     let config: TransportConfig = serde_json::from_value(json!({
         "bind_addr": "0.0.0.0:0",
         "relay_url": argument(value, "relay")?,
+        "relay_ca_file": value.get("relay_ca_file"),
         "discovery_relay_url": value.get("discovery_relay"),
         "backup_relay_urls": value.get("backup_relays").cloned().unwrap_or_else(|| json!([])),
         "prefer_primary_relay": value.get("prefer_primary_relay").cloned().unwrap_or(json!(true)),
@@ -990,6 +991,25 @@ pub fn call_with_publisher(
 #[cfg(test)]
 mod app_transport_tests {
     use super::*;
+
+    #[test]
+    fn explicit_private_relay_trust_is_preserved_without_changing_default_trust() {
+        let relay = "https://127.0.0.1:12345";
+        let config =
+            app_transport_config(&json!({"relay":relay,"relay_ca_file":"/private/relay.pem"}))
+                .unwrap();
+        assert_eq!(
+            config.relay_ca_file,
+            Some(std::path::PathBuf::from("/private/relay.pem"))
+        );
+        assert!(config.backup_relay_urls.is_empty());
+        assert!(
+            app_transport_config(&json!({"relay":relay}))
+                .unwrap()
+                .relay_ca_file
+                .is_none()
+        );
+    }
 
     #[test]
     fn android_discovery_fallback_preserves_primary_and_legacy_init() {

@@ -78,7 +78,15 @@ public final class Native {
    key=new String(cipher.doFinal(Base64.decode(envelope[1],Base64.NO_WRAP)),java.nio.charset.StandardCharsets.US_ASCII);
   }
   File state=new File(context.getFilesDir(),"client");if(!state.exists()&&!state.mkdir())throw new Exception("Cannot prepare protected client state");android.system.Os.chmod(state.getAbsolutePath(),0700);
-  request(new JSONObject().put("op","init").put("key",key).put("state",state.getAbsolutePath()).put("relay","https://relay.wispnet.app").put("backup_relays",new org.json.JSONArray().put("https://usw1-1.relay.n0.iroh.link")));
+  JSONObject init=new JSONObject().put("op","init").put("key",key).put("state",state.getAbsolutePath()).put("relay","https://relay.wispnet.app").put("backup_relays",new org.json.JSONArray().put("https://usw1-1.relay.n0.iroh.link"));
+  File testRelay=new File(context.getFilesDir(),"test-relay.json");
+  if((context.getApplicationInfo().flags & android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE)!=0 && testRelay.isFile()){
+   JSONObject fixture=new JSONObject(new String(java.nio.file.Files.readAllBytes(testRelay.toPath()),java.nio.charset.StandardCharsets.UTF_8));
+   java.net.URI relay=new java.net.URI(fixture.getString("relay"));
+   if(!"https".equals(relay.getScheme()) || !"127.0.0.1".equals(relay.getHost()) || relay.getPort()<=0)throw new Exception("Invalid local test relay");
+   init.put("relay",relay.toString()).put("backup_relays",new org.json.JSONArray()).put("relay_ca_file",new File(context.getFilesDir(),"test-relay.pem").getAbsolutePath());
+  }
+  request(init);
   request(new JSONObject().put("op","set_device_id").put("device_id",DeviceProfile.name(context)));
   ready=true;context.getSharedPreferences("app_access",0).edit().clear().apply();new HostStore(context).reconcile();
  }

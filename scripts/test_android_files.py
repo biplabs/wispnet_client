@@ -18,6 +18,8 @@ import tempfile
 import threading
 import time
 
+from android_test_relay import android_test_relay, write_private_json
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'apps/node/desktop'))
 from wispnet_desktop.api import NodeAPI
@@ -43,6 +45,8 @@ def main():
         if not apk.is_file():
             raise SystemExit(f'Build the current APK first: {apk}')
         adb('install', '-r', apk)
+    adb('shell', 'am', 'force-stop', 'app.wispnet.android')
+    adb('shell', 'pm', 'clear', 'app.wispnet.android')
     adb('shell', 'pm', 'grant', 'app.wispnet.android', 'android.permission.POST_NOTIFICATIONS')
     receiving_folder = 'WispnetReceiveTest-' + secrets.token_hex(6)
     if args.receiving:
@@ -51,7 +55,7 @@ def main():
             'cache/android-receiving-ready.json',
             *['cache/android-receiving-host-' + phase + '.json' for phase in ['send', 'offline', 'resume', 'revoked']])
     binary = ROOT / 'target/debug/wispnet'
-    with tempfile.TemporaryDirectory(prefix='wispnet-android-files-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wispnet-android-files-') as directory, android_test_relay(args.serial) as (relay_url, relay_ca):
         temporary = Path(directory)
         export = temporary / 'incoming'
         export.mkdir(mode=0o700)
@@ -59,7 +63,7 @@ def main():
         config.write_text(
             f'schema_version=2\ndevice_name="files-test-host"\nstate_dir="{temporary / "state"}"\n'
             'log_level="info"\n[transport]\nbind_addr="127.0.0.1:0"\n'
-            'relay_url="https://relay.wispnet.app"\n')
+            f'relay_url={json.dumps(relay_url)}\nrelay_ca_file={json.dumps(str(relay_ca))}\n')
         subprocess.run([binary, 'host-init', '--config', config], check=True, capture_output=True)
         with (args.output / 'host.log').open('w') as log:
             process = subprocess.Popen([binary, 'agent', '--config', config], stdout=subprocess.DEVNULL,
@@ -155,8 +159,7 @@ def main():
                             except Exception as failure:
                                 errors.append(str(failure))
                                 result['error'] = str(failure)
-                            adb('shell', 'run-as', 'app.wispnet.android', 'sh', '-c',
-                                shlex.quote(f'cat > cache/android-receiving-host-{phase}.json'), input=json.dumps(result).encode())
+                            write_private_json(adb, 'app.wispnet.android', f'cache/android-receiving-host-{phase}.json', result)
                     threading.Thread(target=reverse_uploads, daemon=True).start()
                 watcher = threading.Thread(target=approve, daemon=True)
                 watcher.start()

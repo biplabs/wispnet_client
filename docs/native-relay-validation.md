@@ -44,20 +44,18 @@ Wi-Fi interruption is separately opt-in with `--wifi-cycle`; cleanup restores
 Wi-Fi and waits for its IPv4 connection.
 
 Android mode builds the native CLI from current source with that NDK before
-copying it to the device, so an older artifact cannot silently pass the hook.
-Set `WISPNET_ANDROID_NDK` to use a different NDK path in the hook.
-
-To include hardware checks in the pre-push hook:
+copying it to the selected device. Hardware acceptance runs separately from the
+public pre-push suite:
 
 ```sh
-WISPNET_ANDROID_RELAY_TEST=1 ./scripts/test.sh
-WISPNET_ANDROID_RELAY_TEST=1 git push origin main
+python3 scripts/test_hardware.py --serial DEVICE_SERIAL
 ```
 
-The default hook requires no attached device and runs the Linux version. An
-explicitly enabled hardware test fails if its build, NDK tools or authorized
-device is missing. The hook uses the sole authorized device; use the standalone
-`--serial` command when explicit selection is needed.
+Use `--ndk /absolute/path/to/ndk` or `WISPNET_ANDROID_NDK` for a different NDK.
+An explicitly selected hardware test fails if its build, tools or device are
+missing. `scripts/test.sh` and the hook always run the local Linux relay fixture.
+The old hardware environment switches are rejected with a migration message.
+See [portable testing](testing.md) for all three test layers.
 
 ## Physical LAN and Wi-Fi interruption
 
@@ -87,10 +85,11 @@ Wi-Fi reconnection itself has a separate 45-second fixture bound. No user key,
 pin, grant, or authority generation/revision is replaced. A selected direct path
 can coexist with an unavailable relay; diagnostics report these separately.
 
-To include this case in the hook, set `WISPNET_ANDROID_RELAY_TEST=1`,
-`WISPNET_ANDROID_LAN_ADDRESS=HOST_LAN_IP`, `WISPNET_ANDROID_LAN_PORT=60303`, and
-`WISPNET_ANDROID_WIFI_CYCLE=1`. A requested LAN/Wi-Fi case without Android mode
-fails rather than being silently skipped. The default hook does not cycle Wi-Fi.
+Run the separately selected Wi-Fi case with:
+
+```sh
+python3 scripts/test_hardware.py --serial DEVICE_SERIAL --lan-address HOST_LAN_IP --lan-port 60303 --wifi-cycle
+```
 
 ## What the harness verifies
 
@@ -137,8 +136,8 @@ not closed by this harness.
 The optional [physical two-host harness](physical-relay-validation.md) extends the
 native checks to a second SSH-accessible Linux computer. Both physical hosts have
 their own keys, authority state and local backend, and the tablet connects with
-the opposite host's agent stopped. Enable it with `WISPNET_SSH_RELAY_HOST` alongside
-`WISPNET_ANDROID_RELAY_TEST=1`. Its documented SSH/USB relay forwarding keeps the
+the opposite host's agent stopped. Enable it with `python3 scripts/test_hardware.py --serial DEVICE_SERIAL
+--ssh-host SECOND_COMPUTER`. Its documented SSH/USB relay forwarding keeps the
 orchestration computer powered on; it is not a cloud deployment or APK test.
 
 ### Owner-local connection tracing

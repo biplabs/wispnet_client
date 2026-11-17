@@ -16,6 +16,8 @@ import sys
 import tempfile
 import threading
 
+from android_test_relay import android_test_relay, write_private_json
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'apps/node/desktop'))
 from wispnet_desktop.api import NodeAPI
@@ -62,7 +64,7 @@ def main():
     stopped = threading.Event()
     errors = []
     process = None
-    with tempfile.TemporaryDirectory(prefix='wispnet-android-shares-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wispnet-android-shares-') as directory, android_test_relay(args.serial) as (relay_url, relay_ca):
         temporary = Path(directory)
         files = {'model.bin': bytes(range(256)) * 20480 + b'SAF checkpoint',
                  'nested/資料😀.bin': 'Unicode checkpoint 資料 😀'.encode(),
@@ -79,7 +81,8 @@ def main():
                     for path, content in files.items()}
         config = temporary / 'host.toml'
         config.write_text(f'schema_version=2\ndevice_name="android-share-reader"\nstate_dir="{temporary / "state"}"\n'
-                          'log_level="info"\n[transport]\nbind_addr="127.0.0.1:0"\nrelay_url="https://relay.wispnet.app"\n')
+                          'log_level="info"\n[transport]\nbind_addr="127.0.0.1:0"\n'
+                          f'relay_url={json.dumps(relay_url)}\nrelay_ca_file={json.dumps(str(relay_ca))}\n')
         subprocess.run([binary, 'host-init', '--config', config], check=True, capture_output=True)
         with (args.output / 'host.log').open('w') as log:
             process = subprocess.Popen([binary, 'agent', '--config', config], stdout=subprocess.DEVNULL,
@@ -174,8 +177,7 @@ def main():
                         except Exception as failure:
                             errors.append(f'{phase}: {failure}')
                             result['error'] = str(failure)
-                        adb('shell', 'run-as', app, 'sh', '-c',
-                            shlex.quote(f'cat > cache/android-shares-host-{phase}.json'), input=json.dumps(result).encode())
+                        write_private_json(adb, app, f'cache/android-shares-host-{phase}.json', result)
 
                 threading.Thread(target=approve, daemon=True).start()
                 threading.Thread(target=pull, daemon=True).start()

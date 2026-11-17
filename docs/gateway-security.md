@@ -146,8 +146,8 @@ browser session. Existing [service recreation](service-lifecycle.md) and
 Run the opt-in physical test only on those approved paired hosts:
 
 ```sh
-python3 scripts/test_physical_gateway_security.py
-python3 scripts/test_physical_service_recreation.py
+python3 scripts/test_physical_gateway_security.py --ssh-host SECOND_COMPUTER --local-node /path/to/wispnet-node --remote-node /remote/path/to/wispnet-node
+python3 scripts/test_physical_service_recreation.py --ssh-host SECOND_COMPUTER --local-node /path/to/wispnet-node --remote-node /remote/path/to/wispnet-node
 cargo test -p wispnet-client --lib --locked
 ```
 

@@ -853,7 +853,11 @@ mod tests {
                 drop(client);
             } else {
                 drop(client);
-                worker.await.unwrap().unwrap();
+                // A frame already in flight may observe the closed duplex
+                // before the read loop observes EOF. Both paths must clean up.
+                if let Err(error) = worker.await.unwrap() {
+                    assert_eq!(error.kind(), io::ErrorKind::BrokenPipe);
+                }
             }
             assert!(manager.inner.sessions.lock().unwrap().is_empty());
             tokio::time::timeout(Duration::from_secs(3), async {

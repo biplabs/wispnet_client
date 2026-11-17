@@ -22,6 +22,9 @@ production browser gateway remain unimplemented. See the
 
 ## Build and verify
 
+See [portable testing](testing.md) for the default suite, clean Linux environment,
+disposable Android emulator integration and explicit hardware acceptance.
+
 Develop directly on main and push to origin/main. Install the local pre-push
 hook once per checkout:
 
@@ -32,7 +35,7 @@ git push
 ```
 
 The hook runs formatting, Clippy, unit tests, a debug build, CLI lifecycle/tunnel
-smoke tests, and the disposable browser-boundary suite. Install OpenSSL, uv and Python 3.11+ for that suite. Standalone relay TLS and Sites relay
+smoke tests, and the disposable browser-boundary suite. Install OpenSSL, uv and Python 3.12+ for that suite. Standalone relay TLS and Sites relay
 checks run separately in `wispnet_server/scripts/test.sh`. The optional
 [live Sites compatibility test](../../wispnet_server/docs/sites-relay-validation.md) reports hosting failures
 separately from the local suite.

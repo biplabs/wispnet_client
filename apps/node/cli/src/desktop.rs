@@ -964,6 +964,7 @@ mod tests {
         bridge: Arc<Bridge>,
         status: Arc<Mutex<Value>>,
         calls: Arc<Mutex<Vec<Value>>>,
+        diagnostic_release: Arc<(Mutex<bool>, std::sync::Condvar)>,
         stop: Arc<AtomicBool>,
         worker: Option<std::thread::JoinHandle<()>>,
     }
@@ -987,6 +988,8 @@ mod tests {
                 "invitations":[],"public_access":{"services":[]}
             })));
             let calls = Arc::new(Mutex::new(Vec::new()));
+            let diagnostic_release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
+            let server_diagnostic_release = diagnostic_release.clone();
             let stop = Arc::new(AtomicBool::new(false));
             let (server_status, server_calls, server_stop) =
                 (status.clone(), calls.clone(), stop.clone());
@@ -997,6 +1000,7 @@ mod tests {
                         Ok((mut stream, _)) => {
                             let status = server_status.clone();
                             let calls = server_calls.clone();
+                            let diagnostic_release = server_diagnostic_release.clone();
                             handlers.push(std::thread::spawn(move || {
                                 let mut line = String::new();
                                 BufReader::new(stream.try_clone().unwrap())
@@ -1009,7 +1013,8 @@ mod tests {
                                     "catalog" => json!({"host":request["host"],"services":status.lock().unwrap()["host"]["services"]}),
                                     "open" => json!({"url": if request["service"] == "tcp" { "tcp://127.0.0.1:18356" } else { "http://web.localhost:18355/" }}),
                                     "diagnose_connection" => {
-                                        std::thread::sleep(Duration::from_millis(300));
+                                        let (released, ready) = &*diagnostic_release;
+                                        drop(ready.wait_while(released.lock().unwrap(), |released| !*released).unwrap());
                                         json!({"selected_path":"direct"})
                                     }
                                     "gateway_settings" => json!({"settings":{"registry_port":18355,"service_ports":[{"port":18356}]},"routes":[]}),
@@ -1035,6 +1040,7 @@ mod tests {
                 bridge,
                 status,
                 calls,
+                diagnostic_release,
                 stop,
                 worker: Some(worker),
             }
@@ -1042,9 +1048,15 @@ mod tests {
         fn last(&self) -> Value {
             self.calls.lock().unwrap().last().unwrap().clone()
         }
+        fn release_diagnostic(&self) {
+            let (released, ready) = &*self.diagnostic_release;
+            *released.lock().unwrap() = true;
+            ready.notify_all();
+        }
     }
     impl Drop for Fixture {
         fn drop(&mut self) {
+            self.release_diagnostic();
             self.stop.store(true, Ordering::Release);
             self.worker.take().unwrap().join().unwrap();
         }
@@ -1184,7 +1196,7 @@ mod tests {
                 .dispatch("connectionDiagnostics", &json!({"host":"b".repeat(64)}))
                 .unwrap()
         });
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(5);
         while !fixture
             .calls
             .lock()
@@ -1195,9 +1207,20 @@ mod tests {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
         }
-        let start = Instant::now();
-        assert_eq!(fixture.bridge.snapshot().unwrap()["enabled"], true);
-        assert!(start.elapsed() < Duration::from_millis(200));
+        // Prove the snapshot finishes while diagnostics are still blocked,
+        // rather than comparing two short wall-clock delays on a fast machine.
+        let (sent, received) = mpsc::channel();
+        let bridge = fixture.bridge.clone();
+        let snapshot = std::thread::spawn(move || sent.send(bridge.snapshot()).unwrap());
+        let result = received.recv_timeout(Duration::from_secs(5));
+        fixture.release_diagnostic();
+        snapshot.join().unwrap();
+        assert_eq!(
+            result
+                .expect("snapshot blocked behind diagnostics")
+                .unwrap()["enabled"],
+            true
+        );
         let report = probe.join().unwrap();
         assert!(report["network"].is_null());
         assert!(report["vpn"].is_null());

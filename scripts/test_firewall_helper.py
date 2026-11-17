@@ -50,7 +50,8 @@ class SocketVerification(unittest.TestCase):
         self.assertEqual(self.verify(), set())
 
     def test_rejects_forged_port_stale_pid_wrong_unit_and_foreign_descriptor(self):
-        for file, replacement in [('cgroup','0::/unrelated.service'),('stat','4242 (other) '+' '.join(['S']+['0']*19)),('status','Uid: 0 0 0 0')]:
+        foreign_uid = ' '.join([str(self.uid + 1)] * 4)
+        for file, replacement in [('cgroup','0::/unrelated.service'),('stat','4242 (other) '+' '.join(['S']+['0']*19)),('status','Uid: ' + foreign_uid)]:
             with self.subTest(file=file):
                 old = (self.process/file).read_text()
                 (self.process/file).write_text(replacement)

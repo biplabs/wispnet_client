@@ -8,6 +8,7 @@ temporary service rows, never resets identities/pins or restarts the relay/GUI.
 import json
 import uuid
 from test_physical_service_recreation import (
+    configure,
     execute,
     request,
     snapshot,
@@ -27,6 +28,7 @@ print((state/'catalog-baselines'/(sys.argv[1]+'.json')).read_text())
 
 
 def main():
+    configure()
     original = {r: snapshot(r) for r in [False, True]}
     prefix = "snapshot-" + uuid.uuid4().hex[:10]
     ids = [prefix + "-a", prefix + "-b"]
@@ -105,7 +107,7 @@ def main():
             assert baseline(source, host) == before
             assert request(source, {"op": "catalog", "host": host}) == removed
             print(
-                f"{'local → headless Ubuntu' if target else 'headless Ubuntu → local'}: complete canonical count, typed metadata, TCP browser denial, filtered withdrawal/removal and durable baseline across source restart passed"
+                f"{'local → remote host' if target else 'remote host → local'}: complete canonical count, typed metadata, TCP browser denial, filtered withdrawal/removal and durable baseline across source restart passed"
             )
     finally:
         for remote in [False, True]:
@@ -148,7 +150,7 @@ def main():
         == "not-found"
     )
     print(
-        "Fixture rows removed; existing authority/pins/services preserved; relay unchanged; desktop.home remains headless"
+        "Fixture rows removed; existing authority/pins/services preserved; relay unchanged; the selected remote remains headless"
     )
 
 

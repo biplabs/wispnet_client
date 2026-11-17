@@ -106,6 +106,11 @@ final class AndroidReceivingChecks {
   } finally { if (bridge != null) bridge.close(); }
  }
  private void folderDownloadPublication(Context context, Uri tree, String folderName, String root) throws Exception {
+  // This helper runs in the instrumentation process; the real online service
+  // and its Native.receivingOnline flag live in the separate :network process.
+  boolean previousOnline = Native.receivingOnline;
+  Native.receivingOnline = true;
+  try {
   AndroidReceiving receiving = new AndroidReceiving(context);
   String claim = digest("folder-download-owner:" + root), name = "downloaded-checkpoint";
   receiving.claimDownloadDirectory(root, name, claim, () -> false);
@@ -144,6 +149,7 @@ final class AndroidReceivingChecks {
    require(modified, "Folder resume trusted a modified provider file with the same length");
   } finally { staged.delete(); }
   checks.put("folder download owns its destination, preserves empty directories and verifies completed SAF children before resume");
+  } finally { Native.receivingOnline = previousOnline; }
  }
  private static String digest(String value) throws Exception {
   return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8)));

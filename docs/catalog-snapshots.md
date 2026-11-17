@@ -133,7 +133,7 @@ the live node's key or owner credentials, install Qt or mutate live grants.
 For installed physical nodes, the opt-in check is:
 
 ```sh
-python3 scripts/test_physical_catalog_snapshots.py
+python3 scripts/test_physical_catalog_snapshots.py --ssh-host SECOND_COMPUTER --local-node /path/to/wispnet-node --remote-node /remote/path/to/wispnet-node
 ```
 
 Both local → headless Ubuntu and reverse passed: complete sorted/count-matched

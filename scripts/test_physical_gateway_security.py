@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Opt-in installed-node security acceptance; no GUI on desktop.home, no relay restart.
+"""Opt-in installed-node security acceptance; no GUI on the selected remote, no relay restart.
 
 Requires existing reciprocal approvals, local Chromium/uv Playwright, and existing
-headless Firefox/geckodriver on desktop.home. Temporary services/units are removed.
+headless Firefox/geckodriver on the selected remote. Temporary services/units are removed.
 """
 
 import json
@@ -14,6 +14,7 @@ import time
 import uuid
 
 from test_physical_service_recreation import (
+    configure,
     execute,
     mutate,
     request,
@@ -45,6 +46,7 @@ print('raw CSRF/null/cross-site/Host/SW/method/upload/framing/bootstrap replay d
 
 
 def main():
+    args = configure()
     baseline = {r: snapshot(r) for r in [False, True]}
     name = "gateway-security-" + uuid.uuid4().hex[:10]
     dirs = {}
@@ -72,7 +74,7 @@ def main():
                             "scp",
                             "-q",
                             str(ROOT / "scripts" / script),
-                            "desktop.home:" + dirs[remote] + "/" + script,
+                            args.ssh_host + ":" + dirs[remote] + "/" + script,
                         ],
                         check=True,
                     )
@@ -286,7 +288,7 @@ finally:c.close()
             fresh_cookie = http(source, fresh)["cookie"]
             assert http(source, fresh, fresh_cookie)["status"] == 200
             print(
-                ("headless Ubuntu → local" if source else "local → headless Ubuntu")
+                ("remote host → local" if source else "local → remote host")
                 + ": host-local revoke denied old route and survived client restart; explicit fresh Open restored access",
                 flush=True,
             )
@@ -335,7 +337,7 @@ finally:c.close()
         == "not-found"
     )
     print(
-        "Temporary services/units removed, authority/pins/access restored, relay PID unchanged; desktop.home remained headless"
+        "Temporary services/units removed, authority/pins/access restored, relay PID unchanged; the selected remote remained headless"
     )
 
 

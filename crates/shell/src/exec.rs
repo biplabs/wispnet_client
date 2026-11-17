@@ -870,8 +870,9 @@ mod tests {
         use std::os::fd::AsRawFd;
         let (_read, write) = inheritable_pipe();
         let fd = write.as_raw_fd();
-        let ceiling = unix::child_fd_limit().unwrap().unwrap();
-        assert!(ceiling > fd);
+        // This test exercises the fallback sweep over our known descriptor,
+        // independent of a host hard limit too large for a bounded sweep.
+        let ceiling = fd.checked_add(1).unwrap();
         let mut builder = tokio::process::Command::new("/bin/sh");
         builder.args([
             "-c",

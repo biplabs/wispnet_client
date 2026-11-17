@@ -248,6 +248,9 @@ Independent single-writer records from many hosts are part of v1; they must not 
 
 ## Development and migration status
 
+[Testing and contributor setup](docs/testing.md): the default local pre-push suite
+requires no phone, second computer, account or installed Wispnet service.
+
 Follow [AGENTS.md](AGENTS.md) and [the contributor guide](docs/development.md): direct work on `main`, local pre-push checks, no mandatory PR/GitHub Actions workflow. Link implementation commits to issues and preserve existing security/storage tests.
 
 The existing development foundations include [Linux identity storage](docs/identity.md), the [bounded authenticated service tunnel](docs/service-tunnel.md), [registry persistence/API](docs/registry-api.md), [key-bound enrollment](docs/enrollment.md), and the browser spike. Native CLI/USB evidence is not a shipping Android app or proof of cross-network relay recovery.

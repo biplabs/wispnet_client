@@ -8,10 +8,10 @@ own identity/owner credentials in fresh protected temporary state; neither host'
 key or owner token is copied. Only binaries, public CA/configuration and an
 intended client's invitation are transferred.
 
-Run the full local hook suite with the current Android binary rebuilt first:
+Run hardware acceptance separately, rebuilding the current Android binary first:
 
 ```sh
-WISPNET_ANDROID_RELAY_TEST=1 WISPNET_SSH_RELAY_HOST=SECOND_COMPUTER scripts/test.sh
+python3 scripts/test_hardware.py --serial AUTHORIZED_ADB_SERIAL --ssh-host SECOND_COMPUTER
 ```
 
 Or after building/validating both native binaries and the relay fixture:

@@ -12,6 +12,8 @@ import sys
 import tempfile
 import threading
 
+from android_test_relay import android_test_relay, write_private_json
+
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'apps/node/desktop'))
 from wispnet_desktop.api import NodeAPI
@@ -51,13 +53,14 @@ def main():
     binary = ROOT / 'target/debug/wispnet'
     stopped = threading.Event()
     errors = []
-    with tempfile.TemporaryDirectory(prefix='wispnet-android-inboxes-') as directory:
+    with tempfile.TemporaryDirectory(prefix='wispnet-android-inboxes-') as directory, android_test_relay(args.serial) as (relay_url, relay_ca):
         temporary = Path(directory)
         sink = temporary / 'desktop-inbox'
         sink.mkdir(mode=0o700)
         config = temporary / 'host.toml'
         config.write_text(f'schema_version=2\ndevice_name="named-inbox-fixture"\nstate_dir="{temporary / "state"}"\n'
-                          'log_level="info"\n[transport]\nbind_addr="127.0.0.1:0"\nrelay_url="https://relay.wispnet.app"\n')
+                          'log_level="info"\n[transport]\nbind_addr="127.0.0.1:0"\n'
+                          f'relay_url={json.dumps(relay_url)}\nrelay_ca_file={json.dumps(str(relay_ca))}\n')
         subprocess.run([binary, 'host-init', '--config', config], check=True, capture_output=True)
         with (args.output / 'host.log').open('w') as log:
             process = subprocess.Popen([binary, 'agent', '--config', config], stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
@@ -145,8 +148,7 @@ def main():
                         except Exception as failure:
                             errors.append(f'{phase}: {failure}')
                             result['error'] = str(failure)
-                        adb('shell', 'run-as', app, 'sh', '-c', shlex.quote(f'cat > cache/android-inboxes-host-{phase}.json'),
-                            input=json.dumps(result).encode())
+                        write_private_json(adb, app, f'cache/android-inboxes-host-{phase}.json', result)
 
                 threading.Thread(target=approve, daemon=True).start()
                 threading.Thread(target=sends, daemon=True).start()

@@ -99,7 +99,7 @@ explicit fresh Open returned HTTP 200.
 Reproduce this opt-in physical check on those already configured hosts with:
 
 ```sh
-python3 scripts/test_physical_service_recreation.py
+python3 scripts/test_physical_service_recreation.py --ssh-host SECOND_COMPUTER --local-node /path/to/wispnet-node --remote-node /remote/path/to/wispnet-node
 ```
 
 The script restarts both nodes, temporarily enables browser access and creates
