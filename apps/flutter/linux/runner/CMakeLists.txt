@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
+  "wayland_egl_compat.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
@@ -21,6 +22,11 @@ add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 
 # Add dependency libraries. Add any application-specific dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter)
-target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK PkgConfig::INDICATOR)
+target_link_libraries(${BINARY_NAME} PRIVATE
+  PkgConfig::GTK PkgConfig::INDICATOR PkgConfig::EGL)
+# GTK calls EGL through libepoxy. Export just its chooser entry point so the
+# compatibility retry is available inside this executable.
+target_link_options(${BINARY_NAME} PRIVATE
+  "LINKER:--export-dynamic-symbol=epoxy_eglChooseConfig")
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

@@ -31,7 +31,8 @@ checksum from a trusted release source. It is not a signed release attestation.
 Only native Linux x86_64/glibc is packaged. The target must meet the binary's
 `minimum_glibc` in the manifest and have libgcc and libm. Other architectures,
 musl, macOS and Windows are unsupported by this bundle. All targets need a
-working systemd user manager. GUI targets additionally need GTK 3, Ayatana AppIndicator and `xdg-open`. No Qt/PySide environment is installed.
+working systemd user manager. GUI targets additionally need GTK 3, EGL,
+Ayatana AppIndicator and `xdg-open`. No Qt/PySide environment is installed.
 Build hosts need Flutter 3.47.9, Clang, CMake, Ninja, the corresponding development packages and `pkg-config`.
 `--headless` builds a node-only bundle; its installer refuses GUI installation
 before changing installed files. `--desktop-binary /absolute/Wispnet` packages an
