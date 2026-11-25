@@ -1358,6 +1358,28 @@ fn cstring(value: &str) -> io::Result<CString> {
     CString::new(value)
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid Files path"))
 }
+#[cfg(target_os = "ios")]
+pub(super) fn open_directory(path: &Path) -> io::Result<File> {
+    if !path.is_absolute()
+        || path
+            .components()
+            .any(|part| matches!(part, std::path::Component::ParentDir))
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "absolute directory required",
+        ));
+    }
+    // The device sandbox permits access to the selected/app-owned directory,
+    // but forbids opening its system ancestors for reading. Darwin can enforce
+    // the same no-symlink traversal guarantee in a single kernel path lookup.
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW_ANY | libc::O_CLOEXEC)
+        .open(path)
+}
+
+#[cfg(not(target_os = "ios"))]
 pub(super) fn open_directory(path: &Path) -> io::Result<File> {
     use std::path::Component;
     if !path.is_absolute() {
