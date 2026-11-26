@@ -9,9 +9,14 @@ use std::{
     sync::{Arc, Condvar, Mutex},
     time::Duration,
 };
+#[cfg(unix)]
+use std::{
+    fs::File,
+    os::fd::{AsRawFd, BorrowedFd},
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
-    sync::mpsc,
+    sync::{mpsc, watch},
 };
 
 const HISTORY_BYTES: usize = 1024 * 1024;
@@ -60,6 +65,8 @@ struct State {
     exited: Option<u32>,
     output_done: bool,
     terminated: bool,
+    #[cfg(unix)]
+    wake_io: Option<io::PipeWriter>,
     cursors: HashMap<u64, u64>,
     next_attachment: u64,
 }
@@ -67,6 +74,7 @@ struct Session {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     termination: std::sync::mpsc::Sender<()>,
+    revoked: watch::Sender<bool>,
     state: Arc<Mutex<State>>,
     space: Arc<Condvar>,
 }
@@ -164,6 +172,101 @@ fn shell_command(shell: &str, script: Option<&str>) -> CommandBuilder {
     }
     command
 }
+
+#[cfg(unix)]
+#[derive(Clone)]
+struct PtyIo {
+    file: Arc<File>,
+    cancelled: Arc<io::PipeReader>,
+    state: Arc<Mutex<State>>,
+}
+
+#[cfg(unix)]
+impl PtyIo {
+    fn new(master: &dyn MasterPty, state: Arc<Mutex<State>>) -> io::Result<Self> {
+        let fd = master
+            .as_raw_fd()
+            .ok_or_else(|| error("Terminal descriptor unavailable"))?;
+        // SAFETY: the master owns the descriptor throughout the duplication.
+        let file = File::from(unsafe { BorrowedFd::borrow_raw(fd) }.try_clone_to_owned()?);
+        let fd = file.as_raw_fd();
+        // SAFETY: the duplicated descriptor is valid and shares the master's flags.
+        let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+        if flags == -1 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } == -1
+        {
+            return Err(io::Error::last_os_error());
+        }
+        let (cancelled, wake) = io::pipe()?;
+        state.lock().unwrap_or_else(|e| e.into_inner()).wake_io = Some(wake);
+        Ok(Self {
+            file: Arc::new(file),
+            cancelled: Arc::new(cancelled),
+            state,
+        })
+    }
+
+    fn transfer(
+        &self,
+        events: libc::c_short,
+        mut operation: impl FnMut(&File) -> io::Result<usize>,
+    ) -> io::Result<usize> {
+        let mut fds = [
+            libc::pollfd {
+                fd: self.cancelled.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            },
+            libc::pollfd {
+                fd: self.file.as_raw_fd(),
+                events,
+                revents: 0,
+            },
+        ];
+        loop {
+            // SAFETY: both descriptors remain owned and poll may update both entries.
+            if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as libc::nfds_t, -1) } == -1 {
+                let err = io::Error::last_os_error();
+                if err.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(err);
+            }
+            let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            if state.terminated || fds[0].revents != 0 {
+                return Err(io::ErrorKind::BrokenPipe.into());
+            }
+            // Hold the state lock only during the nonblocking I/O, so no new
+            // transfer can start after terminate marks the session.
+            match operation(&self.file) {
+                Err(err)
+                    if matches!(
+                        err.kind(),
+                        io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                    ) => {}
+                result => return result,
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Read for PtyIo {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.transfer(libc::POLLIN, |mut file| file.read(buf))
+    }
+}
+
+#[cfg(unix)]
+impl Write for PtyIo {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.transfer(libc::POLLOUT, |mut file| file.write(buf))
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
 impl Session {
     fn signal(&self, name: &str) -> io::Result<()> {
         #[cfg(unix)]
@@ -199,7 +302,11 @@ impl Session {
             return;
         }
         state.terminated = true;
+        // Closing the pipe wakes all PTY polls, even if the slave stays open.
+        #[cfg(unix)]
+        drop(state.wake_io.take());
         drop(state);
+        self.revoked.send_replace(true);
         self.space.notify_all();
         let _ = self.termination.send(());
     }
@@ -212,15 +319,23 @@ impl Session {
                 pixel_height: 0,
             })
             .map_err(pty_error)?;
+        let state = Arc::new(Mutex::new(State::default()));
+        #[cfg(unix)]
+        let (mut reader, writer) = {
+            let io = PtyIo::new(pair.master.as_ref(), state.clone())?;
+            (io.clone(), Box::new(io) as Box<dyn Write + Send>)
+        };
+        #[cfg(not(unix))]
+        let (mut reader, writer) = (
+            pair.master.try_clone_reader().map_err(pty_error)?,
+            pair.master.take_writer().map_err(pty_error)?,
+        );
         let mut child = pair
             .slave
             .spawn_command(shell_command(shell, command))
             .map_err(pty_error)?;
         let (termination, termination_rx) = std::sync::mpsc::channel();
         drop(pair.slave);
-        let mut reader = pair.master.try_clone_reader().map_err(pty_error)?;
-        let writer = pair.master.take_writer().map_err(pty_error)?;
-        let state = Arc::new(Mutex::new(State::default()));
         let output_state = state.clone();
         let space = Arc::new(Condvar::new());
         let output_space = space.clone();
@@ -278,11 +393,21 @@ impl Session {
                 match termination_rx.recv_timeout(Duration::from_millis(50)) {
                     Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
                     Ok(()) | Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                        // Keep signaling and reaping with the same child owner.
-                        // Its kill implementation escalates ignored hangups;
-                        // clone_killer only sends SIGHUP on Unix. This thread
-                        // also keeps the grace period off the async runtime.
-                        let _ = child.kill();
+                        #[cfg(unix)]
+                        let killed_group = child
+                            .process_id()
+                            .and_then(|pid| libc::pid_t::try_from(pid).ok())
+                            .filter(|pid| *pid > 1)
+                            .is_some_and(|pid| {
+                                // SAFETY: portable-pty creates a new session with
+                                // setsid; this child is still owned and unreaped.
+                                unsafe { libc::kill(-pid, libc::SIGKILL) == 0 }
+                            });
+                        #[cfg(not(unix))]
+                        let killed_group = false;
+                        if !killed_group {
+                            let _ = child.kill();
+                        }
                         break child.wait().map(|status| status.exit_code()).unwrap_or(1);
                     }
                 }
@@ -293,11 +418,23 @@ impl Session {
             master: Mutex::new(pair.master),
             writer: Mutex::new(writer),
             termination,
+            revoked: watch::channel(false).0,
             state,
             space,
         })
     }
+    async fn send_input(self: &Arc<Self>, data: Vec<u8>) -> io::Result<()> {
+        let session = self.clone();
+        tokio::task::spawn_blocking(move || session.write_input(&data))
+            .await
+            .map_err(|_| error("Shell input worker failed"))?
+    }
+
     fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
+        let state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if state.terminated {
+            return Ok(());
+        }
         if !valid_size(cols, rows) {
             return Err(error("Invalid terminal size"));
         }
@@ -314,6 +451,14 @@ impl Session {
     }
     fn write_input(&self, data: &[u8]) -> io::Result<()> {
         let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
+        if self
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .terminated
+        {
+            return Ok(());
+        }
         #[cfg(target_os = "macos")]
         {
             // Public Darwin TIOCOUTQ (_IOR('t', 115, int)): bytes awaiting the
@@ -589,10 +734,25 @@ impl SessionManager {
             key: session_key.clone(),
             session: session.clone(),
         });
+        let mut revoked = session.revoked.subscribe();
+        tokio::select! {
+            biased;
+            _ = revoked.wait_for(|revoked| *revoked) => Ok(()),
+            result = self.serve_attached(reader, writer, session, session_key) => result,
+        }
+    }
+
+    async fn serve_attached(
+        &self,
+        mut reader: impl AsyncRead + Unpin + Send + 'static,
+        mut writer: impl AsyncWrite + Unpin,
+        session: Arc<Session>,
+        session_key: SessionKey,
+    ) -> io::Result<()> {
         send_frame(
             &mut writer,
             &ServerFrame::Attached {
-                session: name,
+                session: session_key.1.clone(),
                 username: username(),
             },
         )
@@ -649,12 +809,9 @@ impl SessionManager {
             loop {
                 let frame = match read_client(&mut reader).await {
                     Ok(Some(ClientFrame::Input { data })) => {
-                        let session = input_session.clone();
-                        match tokio::task::spawn_blocking(move || session.write_input(&data)).await
-                        {
-                            Ok(Ok(())) => continue,
-                            Ok(Err(e)) => Err(e),
-                            Err(_) => Err(error("Shell input worker failed")),
+                        match input_session.send_input(data).await {
+                            Ok(()) => continue,
+                            Err(e) => Err(e),
                         }
                     }
                     Ok(Some(ClientFrame::Resize { cols, rows })) => {
@@ -670,19 +827,9 @@ impl SessionManager {
                     Ok(Some(ClientFrame::StdinEof)) => {
                         // A PTY cannot half-close its input; EOT asks a canonical
                         // terminal to deliver EOF, just as typing Ctrl+D does.
-                        let session = input_session.clone();
-                        match tokio::task::spawn_blocking(move || {
-                            session
-                                .writer
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .write_all(&[4])
-                        })
-                        .await
-                        {
-                            Ok(Ok(())) => continue,
-                            Ok(Err(e)) => Err(e),
-                            Err(_) => Err(error("Shell input worker failed")),
+                        match input_session.send_input(vec![4]).await {
+                            Ok(()) => continue,
+                            Err(e) => Err(e),
                         }
                     }
                     frame => frame,
@@ -1212,6 +1359,61 @@ mod tests {
             .unwrap();
         assert!(!Arc::ptr_eq(&session, &fresh));
     }
+
+    #[tokio::test]
+    async fn revocation_closes_stream_and_stops_reader_with_live_background_job() {
+        let manager = SessionManager::with_shell("/bin/sh");
+        let scope = "inc/peer";
+        let mut client = attached(&manager, scope).await;
+        let session =
+            manager.inner.sessions.lock().unwrap()[&(scope.into(), "main".into())].clone();
+        // Job control gives the background job its own process group. It
+        // ignores hangup and keeps stdout/stderr attached to the slave.
+        write_client(
+            &mut client,
+            &ClientFrame::Input {
+                data: br#"set -m; sh -c 'trap "" HUP; printf "\nPTY_HOLDER:%s:PTY_READY\n" "$$"; exec sleep 15' & wait
+"#
+                .to_vec(),
+            },
+        )
+        .await
+        .unwrap();
+        let output = output_until(&mut client, ":PTY_READY\r\n").await;
+        let output = String::from_utf8_lossy(&output);
+        let (_, job) = output.rsplit_once("\nPTY_HOLDER:").unwrap();
+        let (pid, _) = job.split_once(":PTY_READY").unwrap();
+        let pid: libc::pid_t = pid.parse().unwrap();
+        assert!(pid > 1);
+        struct BackgroundJob(libc::pid_t);
+        impl Drop for BackgroundJob {
+            fn drop(&mut self) {
+                // SAFETY: this is the test job reported immediately above.
+                unsafe { libc::kill(self.0, libc::SIGKILL) };
+            }
+        }
+        let _job = BackgroundJob(pid);
+        // SAFETY: getpgid only inspects the test job.
+        assert_eq!(unsafe { libc::getpgid(pid) }, pid);
+        assert!(!session.state.lock().unwrap().output_done);
+
+        manager.close_scope(scope);
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while read_server(&mut client).await.unwrap().is_some() {}
+        })
+        .await
+        .expect("revocation did not close the attached stream");
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while !session.state.lock().unwrap().output_done {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("revocation did not stop the PTY reader");
+        // SAFETY: getpgid only inspects the test job.
+        assert_eq!(unsafe { libc::getpgid(pid) }, pid);
+    }
+
     #[tokio::test]
     async fn revocation_terminates_a_session_that_ignores_hangup() {
         let manager = SessionManager::with_shell("/bin/sh");
