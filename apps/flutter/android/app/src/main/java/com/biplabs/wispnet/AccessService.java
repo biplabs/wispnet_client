@@ -17,6 +17,7 @@ public final class AccessService extends Service {
  private long generation=0;
  private boolean interrupted=false;
  private NetworkController controller;
+ private AccessStatus notificationStatus=AccessStatus.OFFLINE;
  private volatile CompletableFuture<Void> online = new CompletableFuture<>();
  private final Messenger messenger = new Messenger(new Handler(Looper.getMainLooper(), message -> {
   if (message.what != 1 || message.replyTo == null || message.sendingUid != android.os.Process.myUid()) return true;
@@ -48,7 +49,7 @@ public final class AccessService extends Service {
  private ConnectivityManager manager;
  private ConnectivityManager.NetworkCallback callback;
  public void onCreate(){
-  super.onCreate();controller=new NetworkController(this);profileWork.scheduleWithFixedDelay(()->{if(enabled){DeviceProfile.syncAll(this);new AndroidReceiving(this).cleanup();}},5,30,TimeUnit.SECONDS);NotificationManager nm=getSystemService(NotificationManager.class);
+  super.onCreate();controller=new NetworkController(this);profileWork.scheduleWithFixedDelay(()->{if(enabled){refreshNotification();DeviceProfile.syncAll(this);new AndroidReceiving(this).cleanup();}},5,30,TimeUnit.SECONDS);NotificationManager nm=getSystemService(NotificationManager.class);
   nm.createNotificationChannel(new NotificationChannel("access","Wispnet browser access",NotificationManager.IMPORTANCE_LOW));
   manager=getSystemService(ConnectivityManager.class);current=manager.getActiveNetwork();
   networkStatus=current==null?"No network. Reconnect, then reopen the service.":"Network available";
@@ -58,11 +59,24 @@ public final class AccessService extends Service {
   };manager.registerDefaultNetworkCallback(callback);
  }
  static String reconnectedMessage(boolean interrupted){return interrupted?"Reconnected. A page was interrupted; reload that page to continue.":"Network available";}
+ private void refreshNotification(){
+  if (!enabled) return;
+  try { updateNotification(AccessStatus.from(Native.command("local_owner_status"), new HostStore(this).all())); }
+  catch (Exception unavailable) { updateNotification(new AccessStatus(0, 0, 0, "unavailable")); }
+ }
+ void updateNotification(AccessStatus status){
+  synchronized(networkLock){
+   if(destroyed||!enabled||status.equals(notificationStatus))return;
+   notificationStatus=status;
+   getSystemService(NotificationManager.class).notify(1,notification("Wispnet online"));
+  }
+ }
  private Notification notification(String title){
+  String summary=notificationStatus.summary();
   Intent stop=new Intent(this,AccessService.class).setAction("stop");
   PendingIntent pending=PendingIntent.getService(this,2,stop,PendingIntent.FLAG_IMMUTABLE|PendingIntent.FLAG_UPDATE_CURRENT);
   PendingIntent open=PendingIntent.getActivity(this,1,getPackageManager().getLaunchIntentForPackage(getPackageName()),PendingIntent.FLAG_IMMUTABLE);
-  return new Notification.Builder(this,"access").setSmallIcon(R.drawable.ic_stat_wispnet).setContentTitle(title).setContentText("There’s no them. There’s only us.").setContentIntent(open).addAction(new Notification.Action.Builder(null,"Go offline",pending).build()).setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false).setCategory(Notification.CATEGORY_SERVICE).setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE).build();
+  return new Notification.Builder(this,"access").setSmallIcon(R.drawable.ic_stat_wispnet).setContentTitle(title).setContentText(summary).setStyle(new Notification.BigTextStyle().bigText(summary)).setContentIntent(open).addAction(new Notification.Action.Builder(null,"Go offline",pending).build()).setOngoing(true).setOnlyAlertOnce(true).setShowWhen(false).setCategory(Notification.CATEGORY_SERVICE).setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE).build();
  }
  // Call while holding networkLock. Drain every generation, including a callback
  // arriving during native recovery; coalescing must never lose the final network.
@@ -104,6 +118,7 @@ public final class AccessService extends Service {
    if(online.isDone()&&!enabled)online=new CompletableFuture<>();
    if(starting||enabled)return online;
    starting=true;
+   notificationStatus=AccessStatus.OFFLINE;
    startForeground(1,notification("Wispnet starting…"));
    networkWork.execute(()->{
     try{
@@ -116,6 +131,7 @@ public final class AccessService extends Service {
       online.complete(null);
       getSystemService(NotificationManager.class).notify(1,notification("Wispnet online"));
      }
+     refreshNotification();
     }catch(Exception failure){networkStatus="Cannot start browser access: "+failure.getMessage();online.completeExceptionally(failure);stopAccess();}
     finally{synchronized(networkLock){starting=false;}}
    });

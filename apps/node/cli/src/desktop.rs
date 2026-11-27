@@ -331,6 +331,7 @@ impl Bridge {
                 result["order"] = state.preferences["order"].clone();
                 result["hosts"] = state.display.get("hosts").cloned().unwrap_or(json!({}));
                 result["network"] = json!("Node offline");
+                result["relay"] = json!("offline");
                 result["version"] = json!(version());
                 return Ok(result);
             }
@@ -1138,6 +1139,7 @@ mod tests {
         fs::remove_file(fixture.bridge.api.state.join("node.sock")).unwrap();
         let offline = fixture.bridge.snapshot().unwrap();
         assert_eq!(offline["enabled"], false);
+        assert_eq!(offline["relay"], "offline");
         assert_eq!(offline["peer"], own);
         fs::write(fixture.bridge.api.state.join("node.sock"), "not a socket").unwrap();
         assert!(fixture.bridge.snapshot().is_err());

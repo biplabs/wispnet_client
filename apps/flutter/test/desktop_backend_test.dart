@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:wispnet/src/desktop_backend.dart';
@@ -8,6 +10,45 @@ void main() {
   tearDown(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(DesktopBackend.shell, null);
+  });
+
+  test('tray reports the relay offline when access is disabled', () async {
+    final directory = await Directory.systemTemp.createTemp(
+      'wispnet-tray-test',
+    );
+    addTearDown(() => directory.delete(recursive: true));
+    final helper = await File('${directory.path}/wispnet').writeAsString(
+      r'''
+#!/bin/sh
+read -r request || exit
+printf '%s\n' '{"id":1,"result":{}}'
+read -r request || exit
+printf '%s\n' '{"id":2,"result":{"enabled":false,"relay":"connected"}}'
+read -r request || exit
+printf '%s\n' '{"id":3,"result":{"enabled":true,"relay":"connected"}}'
+read -r request
+'''
+          .trimLeft(),
+    );
+    final chmod = await Process.run('chmod', ['700', helper.path]);
+    expect(chmod.exitCode, 0);
+    final statuses = <Map<Object?, Object?>>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(DesktopBackend.shell, (call) async {
+          expect(call.method, 'status');
+          statuses.add(call.arguments as Map<Object?, Object?>);
+          return null;
+        });
+    final backend = DesktopBackend(helper: helper.path);
+    addTearDown(backend.close);
+
+    await backend.invoke('snapshot');
+    expect(statuses.last['online'], false);
+    expect(statuses.last['text'], endsWith('Relay: offline'));
+
+    await backend.invoke('snapshot');
+    expect(statuses.last['online'], true);
+    expect(statuses.last['text'], endsWith('Relay: connected'));
   });
 
   test(

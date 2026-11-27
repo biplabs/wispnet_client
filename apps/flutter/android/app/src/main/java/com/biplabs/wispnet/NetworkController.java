@@ -87,16 +87,16 @@ final class NetworkController extends ContextWrapper {
     JSONArray localServices = owned.getJSONObject("host").getJSONArray("services");
     JSONObject publicAccess = new JSONObject().put("host", own).put("version", 1)
       .put("services", owned.getJSONObject("public_access").getJSONArray("services"));
-    int pendingRequests = 0; JSONArray invitations = owned.getJSONArray("invitations");
-    for (int index=0;index<invitations.length();index++) if ("pending".equals(invitations.getJSONObject(index).optString("state"))) pendingRequests++;
+    AccessStatus accessStatus = AccessStatus.from(owned, hosts);
+    service.updateNotification(accessStatus);
     hosts.put(own, new JSONObject().put("name", DeviceProfile.name(this)).put("local", true)
      .put("state", "available").put("catalog", new JSONObject().put("host", own).put("services", localServices))
      .put("public_access", publicAccess));
     return new JSONObject().put("hosts", hosts).put("name", DeviceProfile.name(this))
-     .put("pendingRequests", pendingRequests)
+     .put("pendingRequests", accessStatus.pendingRequests())
      .put("share_downloads", downloads.snapshots())
      .put("network_pid", android.os.Process.myPid()).put("peer", own).put("enabled", service.enabled)
-     .put("network", service.networkStatus).put("relay", Native.command("relay_status").getString("relay"))
+     .put("network", service.networkStatus).put("relay", accessStatus.relay())
      .put("telemetry", Native.command("telemetry")).put("order", order)
      .put("version", getPackageManager().getPackageInfo(getPackageName(), 0).versionName);
    }
