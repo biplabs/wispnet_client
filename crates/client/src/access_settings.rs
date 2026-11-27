@@ -65,51 +65,73 @@ impl Settings {
         Ok(())
     }
     pub fn load(state: &Path) -> Result<Self, String> {
-        let file = match std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
-            .open(state.join("access-settings.json"))
-        {
-            Ok(f) => f,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Self::default()),
-            Err(_) => return Err("Cannot read access settings".into()),
-        };
-        let m = file
-            .metadata()
-            .map_err(|_| "Cannot inspect access settings")?;
-        if !m.is_file()
-            || m.nlink() != 1
-            || m.uid() != unsafe { libc::geteuid() }
-            || m.mode() & 0o777 != 0o600
-            || m.len() > 32768
-        {
-            return Err("Unsafe access settings file".into());
-        }
-        let mut bytes = Vec::new();
-        file.take(32769)
-            .read_to_end(&mut bytes)
-            .map_err(|_| "Cannot read access settings")?;
-        let settings: Self =
-            serde_json::from_slice(&bytes).map_err(|_| "Invalid access settings")?;
+        let settings: Self = load(state, "access-settings.json")?.unwrap_or_default();
         settings.validate()?;
         Ok(settings)
     }
+
     pub fn save(&self, state: &Path) -> Result<(), String> {
         self.validate()?;
-        let path = state.join("access-settings.json");
-        let mut file = wispnet_registry::control::credential_temp(&path)
-            .map_err(|_| "Cannot save access settings")?;
-        serde_json::to_writer(&mut file, self).map_err(|_| "Cannot save access settings")?;
-        file.flush()
-            .and_then(|_| file.as_file().sync_all())
-            .map_err(|_| "Cannot save access settings")?;
-        file.persist(path)
-            .map_err(|_| "Cannot save access settings")?;
-        std::fs::File::open(state)
-            .and_then(|f| f.sync_all())
-            .map_err(|_| "Cannot sync access settings")?;
-        Ok(())
+        save(state, "access-settings.json", self)
     }
+}
+
+/// Missing preference preserves startup behavior for existing installations.
+pub fn saved_enabled(state: &Path) -> Result<Option<bool>, String> {
+    load(state, "access-enabled.json")
+}
+
+pub fn save_enabled(state: &Path, enabled: bool) -> Result<(), String> {
+    if matches!(saved_enabled(state), Ok(Some(current)) if current == enabled) {
+        return Ok(());
+    }
+    save(state, "access-enabled.json", &enabled)
+}
+
+fn load<T: serde::de::DeserializeOwned>(state: &Path, name: &str) -> Result<Option<T>, String> {
+    let file = match std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(state.join(name))
+    {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("Cannot read access settings".into()),
+    };
+    let metadata = file
+        .metadata()
+        .map_err(|_| "Cannot inspect access settings")?;
+    if !metadata.is_file()
+        || metadata.nlink() != 1
+        || metadata.uid() != unsafe { libc::geteuid() }
+        || metadata.mode() & 0o777 != 0o600
+        || metadata.len() > 32768
+    {
+        return Err("Unsafe access settings file".into());
+    }
+    let mut bytes = Vec::new();
+    file.take(32769)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "Cannot read access settings")?;
+    serde_json::from_slice(&bytes)
+        .map(Some)
+        .map_err(|_| "Invalid access settings".into())
+}
+
+fn save(state: &Path, name: &str, value: &impl Serialize) -> Result<(), String> {
+    let path = state.join(name);
+    let mut file = wispnet_registry::control::credential_temp(&path)
+        .map_err(|_| "Cannot save access settings")?;
+    serde_json::to_writer(&mut file, value).map_err(|_| "Cannot save access settings")?;
+    file.flush()
+        .and_then(|_| file.as_file().sync_all())
+        .map_err(|_| "Cannot save access settings")?;
+    file.persist(path)
+        .map_err(|_| "Cannot save access settings")?;
+    std::fs::File::open(state)
+        .and_then(|f| f.sync_all())
+        .map_err(|_| "Cannot sync access settings")?;
+    Ok(())
 }
 
 #[cfg(test)]

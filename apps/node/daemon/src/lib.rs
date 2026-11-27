@@ -14,6 +14,7 @@ use tokio::{
     net::{UnixListener, UnixStream},
     task::JoinSet,
 };
+pub use wispnet_client::access_settings::{save_enabled, saved_enabled};
 use wispnet_core::{config::Config, identity::IdentityStore};
 struct State {
     state_dir: PathBuf,
@@ -23,11 +24,32 @@ struct State {
     counts: wispnet_agent::tunnel::ActiveCounts,
     relay_configured: bool,
     config: Config,
+    access_lock: tokio::sync::Mutex<()>,
 }
 impl State {
     async fn request(&self, mut value: Value) -> Result<Value, String> {
         let op = value["op"].as_str().ok_or("Missing operation")?.to_owned();
         match op.as_str() {
+            "enable" | "stop" => {
+                let _lock = self.access_lock.lock().await;
+                if op == "stop" {
+                    // Persist the pause before asynchronously tearing down listeners.
+                    save_enabled(&self.state_dir, false)?;
+                    return self.client.command(&value).await;
+                }
+                let was_enabled = self.client.gateway.is_enabled();
+                if value["if_unset"] == true && saved_enabled(&self.state_dir)?.is_some() {
+                    return Ok(json!({"enabled": was_enabled}));
+                }
+                let response = self.client.command(&value).await?;
+                if let Err(error) = save_enabled(&self.state_dir, true) {
+                    if !was_enabled {
+                        let _ = self.client.command(&json!({"op":"stop"})).await;
+                    }
+                    return Err(error);
+                }
+                Ok(response)
+            }
             "invite_qr" => {
                 let config = self.config.clone();
                 tokio::task::spawn_blocking(move || {
@@ -217,8 +239,6 @@ impl State {
             | "diagnose_connection"
             | "set_name"
             | "telemetry"
-            | "enable"
-            | "stop"
             | "access_status" => self.client.command(&value).await,
             _ => Err("Unsupported local operation".into()),
         }
@@ -403,7 +423,22 @@ pub async fn run(
         transport.clone(),
         authority.clone(),
     );
-    if let Err(error) = client.publications.restore(client.clone()).await {
+    let restore_public = match saved_enabled(&config.state_dir) {
+        Ok(Some(true)) => match client.restore_access().await {
+            Ok(()) => false,
+            Err(error) => {
+                tracing::warn!("Saved access setting could not be restored: {error}");
+                true
+            }
+        },
+        Ok(Some(false)) => false,
+        Ok(None) => true,
+        Err(error) => {
+            tracing::warn!("Saved access setting unavailable: {error}");
+            false
+        }
+    };
+    if restore_public && let Err(error) = client.publications.restore(client.clone()).await {
         tracing::warn!("Public services unavailable: {error}");
     }
     let path = config.state_dir.join("node.sock");
@@ -427,6 +462,7 @@ pub async fn run(
         counts: host.counts(),
         relay_configured: transport.relay_url.is_some(),
         config: config.clone(),
+        access_lock: tokio::sync::Mutex::new(()),
     });
     let mut firewall_reporter = firewall::Reporter::new();
     let mut firewall_tick = tokio::time::interval(std::time::Duration::from_secs(1));

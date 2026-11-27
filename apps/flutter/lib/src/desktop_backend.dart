@@ -14,7 +14,7 @@ class DesktopBackend implements WispnetBackend {
   DesktopBackend({this.helper}) {
     shell.setMethodCallHandler((call) async {
       if (call.method == 'exit') {
-        await invoke('setAccess', {'enabled': false});
+        await invoke('stopDesktop');
       }
     });
   }

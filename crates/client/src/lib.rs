@@ -290,6 +290,41 @@ impl Client {
             check_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         }))
     }
+    /// Restore the browser listener and saved routes without a peer discovery pass at boot.
+    pub async fn restore_access(self: &Arc<Self>) -> Result<(), String> {
+        self.enable_access(false).await
+    }
+
+    async fn enable_access(self: &Arc<Self>, discover_routes: bool) -> Result<(), String> {
+        let _guard = self.gateway.settings_lock.lock().await;
+        let discover = !self.gateway.is_enabled();
+        self.gateway.enable();
+        if let Err(error) = self.gateway.restore(self.clone()).await {
+            if let Some(host) = &self._host {
+                host.set_services_enabled(false);
+            }
+            self.publications.stop().await;
+            self.gateway.stop().await;
+            return Err(error);
+        }
+        if discover && discover_routes {
+            // Populate permitted routes so a copied HTTP link also works
+            // before the user opens its tile on this device.
+            let _ = self.service_list().await;
+        }
+        if let Some(host) = &self._host {
+            host.set_services_enabled(true);
+        }
+        if discover && let Err(error) = self.publications.restore(self.clone()).await {
+            if let Some(host) = &self._host {
+                host.set_services_enabled(false);
+            }
+            self.gateway.stop().await;
+            return Err(error);
+        }
+        Ok(())
+    }
+
     /// Embedded hosts follow the local access switch. Daemon-owned endpoints
     /// remain admitted until their owning runtime stops them.
     pub fn services_enabled(&self) -> bool {
@@ -828,32 +863,7 @@ impl Client {
             }
             "access_status" => Ok(json!({"enabled":self.gateway.is_enabled()})),
             "enable" => {
-                let _guard = self.gateway.settings_lock.lock().await;
-                let discover = !self.gateway.is_enabled();
-                self.gateway.enable();
-                if let Err(error) = self.gateway.restore(self.clone()).await {
-                    if let Some(host) = &self._host {
-                        host.set_services_enabled(false);
-                    }
-                    self.publications.stop().await;
-                    self.gateway.stop().await;
-                    return Err(error);
-                }
-                if discover {
-                    // Populate permitted routes so a copied HTTP link also works
-                    // before the user opens its tile on this device.
-                    let _ = self.service_list().await;
-                }
-                if let Some(host) = &self._host {
-                    host.set_services_enabled(true);
-                }
-                if discover && let Err(error) = self.publications.restore(self.clone()).await {
-                    if let Some(host) = &self._host {
-                        host.set_services_enabled(false);
-                    }
-                    self.gateway.stop().await;
-                    return Err(error);
-                }
+                self.enable_access(true).await?;
                 Ok(json!({"enabled":true}))
             }
             "stop" => {

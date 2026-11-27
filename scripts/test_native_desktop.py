@@ -108,21 +108,9 @@ class NativeDesktopIntegration(unittest.TestCase):
         )
         self.agent_log = (self.root / "agent.log").open("wb")
         self.addCleanup(self.agent_log.close)
-        self.agent = subprocess.Popen(
-            [BINARY, "agent", "--config", self.config],
-            stdout=subprocess.DEVNULL, stderr=self.agent_log,
-            env=self.environment,
-        )
+        self.agent = None
         self.addCleanup(self.stop_agent)
-        deadline = time.monotonic() + 15
-        while True:
-            self.assertIsNone(self.agent.poll(), "Native agent failed to start")
-            try:
-                self.initial = self.node_request({"op": "status"})
-                break
-            except (ValueError, subprocess.CalledProcessError):
-                self.assertLess(time.monotonic(), deadline, "Native node socket was not ready")
-                time.sleep(.03)
+        self.initial = self.start_agent()
         with socket.socket() as listener:
             listener.bind(("127.0.0.1", 0))
             registry_port = listener.getsockname()[1]
@@ -135,8 +123,53 @@ class NativeDesktopIntegration(unittest.TestCase):
         self.addCleanup(self.bridge.close)
         self.own = self.initial["host"]["host"]
 
+    def start_agent(self):
+        self.agent = subprocess.Popen(
+            [BINARY, "agent", "--config", self.config],
+            stdout=subprocess.DEVNULL, stderr=self.agent_log,
+            env=self.environment,
+        )
+        deadline = time.monotonic() + 15
+        while True:
+            self.assertIsNone(self.agent.poll(), "Native agent failed to start")
+            try:
+                return self.node_request({"op": "status"})
+            except (ValueError, subprocess.CalledProcessError):
+                self.assertLess(time.monotonic(), deadline, "Native node socket was not ready")
+                time.sleep(.03)
+
+    def test_access_switch_survives_restart_and_desktop_refresh(self):
+        self.assertFalse(self.initial["access_enabled"])
+        port = self.node_request({"op": "gateway_settings"})["settings"]["registry_port"]
+        self.node_request({"op": "enable"})
+        self.stop_agent()
+        self.assertTrue(self.start_agent()["access_enabled"])
+        self.assertTrue(self.bridge.request("snapshot")["enabled"])
+        with socket.create_connection(("127.0.0.1", port), timeout=1):
+            pass
+
+        self.node_request({"op": "stop"})
+        self.stop_agent()
+        self.assertFalse(self.start_agent()["access_enabled"])
+        self.assertFalse(self.bridge.request("snapshot")["enabled"])
+        self.assertFalse(self.node_request({"op": "access_status"})["enabled"])
+        with self.assertRaises(OSError):
+            socket.create_connection(("127.0.0.1", port), timeout=1)
+        with socket.socket() as occupied:
+            occupied.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            occupied.bind(("127.0.0.1", port))
+            occupied.listen()
+            with self.assertRaises(ValueError):
+                self.node_request({"op": "enable"})
+        self.stop_agent()
+        self.assertFalse(self.start_agent()["access_enabled"])
+
+        self.node_request({"op": "enable"})
+        self.stop_agent()
+        self.assertTrue(self.start_agent()["access_enabled"])
+
     def stop_agent(self):
-        if self.agent.poll() is None:
+        if self.agent is not None and self.agent.poll() is None:
             self.agent.terminate()
             try:
                 self.agent.wait(timeout=10)

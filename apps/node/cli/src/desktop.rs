@@ -336,8 +336,10 @@ impl Bridge {
             }
             Err(error) => return Err(error),
         };
-        if status["access_enabled"] != true {
-            self.api.request(json!({"op":"enable"}))?;
+        let mut enabled = status["access_enabled"] == true;
+        if !enabled && matches!(wispnet_node::saved_enabled(&self.api.state), Ok(None)) {
+            let access = self.api.request(json!({"op":"enable","if_unset":true}))?;
+            enabled = access["enabled"] == true;
         }
         let own = text(&status["host"], "host")?;
         let mut services = Vec::new();
@@ -400,7 +402,7 @@ impl Bridge {
         state.display = json!({"name":status["host_name"],"peer":own,"hosts":hosts,"relay":status["relay"],"telemetry":{"peers":status["peer_telemetry"]}});
         self.save(&state)?;
         let mut result = state.display.clone();
-        result["enabled"] = json!(true);
+        result["enabled"] = json!(enabled);
         result["desktop"] = json!(true);
         result["order"] = state.preferences["order"].clone();
         result["network"] = json!("Network available");
@@ -623,11 +625,27 @@ impl Bridge {
                 let out=command(Command::new(std::env::current_exe().map_err(|e| e.to_string())?).args(["ssh-bridge","--host",host,"--config"]).arg(&self.config).arg("--install-config"),None,35)?;
                 Ok(json!({"command":String::from_utf8_lossy(&out).trim()}))
             }
-            "startDesktop" => { self.lifecycle(true)?; self.api.request(json!({"op":"enable"}))?; Ok(json!({})) }
+            "startDesktop" => {
+                let saved = wispnet_node::saved_enabled(&self.api.state)?;
+                if saved != Some(false) {
+                    self.lifecycle(true)?;
+                }
+                Ok(json!({}))
+            }
+            "stopDesktop" => { self.lifecycle(false)?; Ok(json!({})) }
             "snapshot" => self.snapshot(),
             "resolveLink" => self.api.request(json!({"op":"resolve_link","link":text(args,"link")?})),
             "takeInvitation" => Ok(json!({})),
-            "setAccess" => { let enabled=bool_arg(args,"enabled",false)?; self.lifecycle(enabled)?; if enabled { self.api.request(json!({"op":"enable"}))?; } Ok(json!({})) }
+            "setAccess" => {
+                let enabled = bool_arg(args, "enabled", false)?;
+                self.lifecycle(enabled)?;
+                if enabled {
+                    self.api.request(json!({"op":"enable"}))?;
+                } else {
+                    wispnet_node::save_enabled(&self.api.state, false)?;
+                }
+                Ok(json!({}))
+            }
             "refreshHost" => self.refresh(text(args,"host")?),
             "connectionDiagnostics" => {
                 let host=text(args,"host")?; if !ident(host) { return Err("Choose a paired device to diagnose".into()); }
