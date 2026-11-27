@@ -323,15 +323,15 @@ async fn stream_and_connection_limits_deny_without_extra_backend_and_release_cap
         Err(TunnelError::Status(Status::Busy))
     ));
     let other = tunnel::bind_client(&key).await.unwrap();
-    assert!(
-        tunnel::connect(
-            &other,
-            host.endpoint().id(),
-            host.endpoint().bound_sockets()[0]
-        )
-        .await
-        .is_err()
-    );
+    if let Ok(excess) = tunnel::connect(
+        &other,
+        host.endpoint().id(),
+        host.endpoint().bound_sockets()[0],
+    )
+    .await
+    {
+        assert!(tunnel::open_service(&excess, "website").await.is_err());
+    }
     assert_eq!(backend.total.load(Ordering::SeqCst), 1);
     drop(stream);
     until(|| counts.streams() == 0 && backend.live.load(Ordering::SeqCst) == 0).await;

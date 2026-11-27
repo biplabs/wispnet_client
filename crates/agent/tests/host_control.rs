@@ -63,6 +63,54 @@ fn config() -> TransportConfig {
 }
 
 #[tokio::test]
+async fn approved_connection_and_pairing_hello_can_share_a_host_with_one_connection_slot() {
+    let directory = dir();
+    let host_key = Identity::generate();
+    let approved = Identity::generate();
+    let newcomer = Identity::generate();
+    let own = host_key.endpoint_id();
+    host::initialize(directory.path(), own).unwrap();
+    approve(directory.path(), own, approved.endpoint_id(), 0);
+    let mut limits = config();
+    limits.max_connections = 1;
+    let host = tunnel::TunnelHost::bind_host(
+        host_key.secret_key(),
+        &limits,
+        Authority::open(directory.path(), own).unwrap(),
+    )
+    .await
+    .unwrap();
+    let address = host.endpoint().bound_sockets()[0];
+    let target = iroh::EndpointAddr::new(own).with_ip_addr(address);
+    let pairing_client = tunnel::bind_client(newcomer.secret_key()).await.unwrap();
+    let pairing = pairing_client
+        .connect(target, wispnet_core::pairing::ALPN)
+        .await
+        .unwrap();
+
+    let client = tunnel::bind_client(approved.secret_key()).await.unwrap();
+    let connection = control::connect(&client, own, address).await.unwrap();
+    assert_eq!(
+        control::catalog_on(&connection, own)
+            .await
+            .unwrap()
+            .revision,
+        1
+    );
+    assert_eq!(
+        wispnet_agent::pairing::hello_on(&pairing, own)
+            .await
+            .unwrap()
+            .host,
+        own
+    );
+
+    client.close().await;
+    pairing_client.close().await;
+    host.shutdown().await;
+}
+
+#[tokio::test]
 async fn public_links_are_filtered_read_only_and_do_not_change_catalog_baselines() {
     use wispnet_core::host::PublicLink;
     let directory = dir();

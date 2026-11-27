@@ -1,6 +1,8 @@
 //! Authenticated direct/explicit-relay service transport. Browser access protection belongs to #10.
+use crate::handshake::HandshakeLimits;
 use iroh::{
     Endpoint, EndpointAddr,
+    endpoint::IncomingAddr,
     endpoint::{Connection, QuicTransportConfig, RecvStream, SendStream, presets},
 };
 use std::{
@@ -287,6 +289,16 @@ impl Services {
             Self::Host(host, _, _, _) => host.pairing_pending(peer).await.unwrap_or(false),
         }
     }
+    fn known_relay_peer(&self, peer: EndpointId) -> bool {
+        match self {
+            Self::Static(services) => services.iter().any(|s| s.allow.contains(&peer)),
+            Self::Host(_, _, _, policy) => match &*policy.borrow() {
+                HostPolicy::Current(snapshot) => snapshot.clients.iter().any(|c| c.peer == peer),
+                _ => false,
+            },
+        }
+    }
+
     async fn approved(&self, peer: EndpointId) -> bool {
         match self {
             Self::Static(services) => services.iter().any(|s| s.allow.contains(&peer)),
@@ -549,6 +561,9 @@ async fn serve(
     mut stop: watch::Receiver<bool>,
     mut services_enabled: watch::Receiver<bool>,
 ) {
+    let handshakes = HandshakeLimits::new(32, 4);
+    let known_relay_handshakes = HandshakeLimits::new(16, 4);
+    let pairing = Arc::new(Semaphore::new(4));
     let connections = Arc::new(Semaphore::new(config.max_connections));
     let streams = Arc::new(Semaphore::new(config.max_streams));
     let mut tasks = JoinSet::new();
@@ -590,7 +605,20 @@ async fn serve(
             incoming = endpoint.accept() => {
                 let Some(incoming) = incoming else { break };
                 if !*services_enabled.borrow() { incoming.refuse(); continue; }
-                let Ok(permit) = connections.clone().try_acquire_owned() else { incoming.refuse(); continue };
+                let address = incoming.remote_addr();
+                if matches!(address, IncomingAddr::Ip(_)) && !incoming.remote_addr_validated() {
+                    let _ = incoming.retry();
+                    continue;
+                }
+                let limits = match &address {
+                    IncomingAddr::Relay { endpoint_id, .. } if services.known_relay_peer(*endpoint_id) => {
+                        &known_relay_handshakes
+                    }
+                    _ => &handshakes,
+                };
+                let Some(handshake) = limits.try_acquire(address) else { incoming.refuse(); continue };
+                let connections = connections.clone();
+                let pairing = pairing.clone();
                 let services = services.clone();
                 let streams = streams.clone();
                 let counts = counts.clone();
@@ -602,18 +630,19 @@ async fn serve(
                 // Count before spawning so it includes in-flight handshakes.
                 let guard = CountGuard::new(counts.connections.clone());
                 tasks.spawn(async move {
-                    let _permit = permit;
                     let _guard = guard;
                     let Ok(Ok(connection)) = timeout(HANDSHAKE_TIMEOUT, incoming).await else { return };
                     let _close = CloseConnection(connection.clone());
                     // Only the completed transport handshake establishes peer authority.
                     let peer = connection.remote_id();
                     if connection.alpn() == wispnet_core::pairing::ALPN {
-                        // Public bootstrap has no access to authority. One RPC,
-                        // bounded idle/read time, and the same global budgets.
-                        let _close = CloseConnection(connection.clone());
+                        // Pairing has its own connection and stream capacity.
+                        let Ok(_pairing) = pairing.try_acquire_owned() else {
+                            connection.close((Status::Busy as u32).into(), b"pairing busy");
+                            return;
+                        };
+                        drop(handshake);
                         let Ok(Ok((send, recv))) = timeout(HANDSHAKE_TIMEOUT, connection.accept_bi()).await else { return };
-                        let Ok(_stream_permit) = streams.try_acquire_owned() else { return };
                         let _stream_guard = CountGuard::new(counts.streams.clone());
                         if let Services::Host(authority, _, _, _) = services {
                             crate::pairing::serve_stream(send, recv, peer, authority).await;
@@ -629,6 +658,11 @@ async fn serve(
                         connection.close((Status::Denied as u32).into(), reason);
                         return;
                     }
+                    let Ok(_permit) = connections.try_acquire_owned() else {
+                        connection.close((Status::Busy as u32).into(), b"connection capacity");
+                        return;
+                    };
+                    drop(handshake);
                     let _peer = PeerGuard::new(counts.clone(), peer);
                     serve_connection(connection, peer, services, streams, max, counts, diagnostics).await;
                 });
