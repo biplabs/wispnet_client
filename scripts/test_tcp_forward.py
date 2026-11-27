@@ -158,8 +158,22 @@ class ForwardingTests(unittest.TestCase):
                     self.assertEqual(two.recv(1), b'')
                 with self.assertRaises((OSError, ValueError, StopIteration)):
                     opening('database')
-                with self.assertRaises(OSError):
-                    socket.create_connection((parsed.hostname, parsed.port), timeout=2)
+                # Host revocation can close active streams before the client's
+                # next catalog check shuts down its loopback listener.
+                deadline = time.monotonic() + 5
+                while True:
+                    try:
+                        late = socket.create_connection((parsed.hostname, parsed.port), timeout=2)
+                    except ConnectionRefusedError:
+                        break
+                    with late:
+                        try:
+                            late.sendall(b'revoked')
+                            self.assertEqual(late.recv(7), b'')
+                        except (BrokenPipeError, ConnectionResetError):
+                            pass
+                    self.assertLess(time.monotonic(), deadline, 'Revoked TCP listener stayed open')
+                    time.sleep(.05)
 
                 http = urlsplit(opening('socket'))
                 with socket.create_connection(('127.0.0.1', http.port), timeout=8) as ws:

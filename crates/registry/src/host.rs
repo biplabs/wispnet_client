@@ -185,6 +185,13 @@ pub struct Snapshot {
     pub file_shares: BTreeMap<String, PathBuf>,
     pub file_inboxes: BTreeMap<String, PathBuf>,
 }
+impl Snapshot {
+    pub fn enabled_services(&self) -> impl Iterator<Item = &LocalService> {
+        self.services.iter().filter(|service| {
+            service.enabled && (service.kind != ServiceKind::Files || !self.file_exports.is_empty())
+        })
+    }
+}
 #[derive(Serialize)]
 pub struct Client {
     pub peer: EndpointId,
@@ -1381,28 +1388,17 @@ impl Authority {
     }
     /// Serving paths use only enabled bindings; owner snapshots retain paused services.
     pub async fn services(&self) -> Result<Vec<LocalService>, ControlError> {
-        let snapshot = self.snapshot().await?;
-        let legacy_files_configured = !snapshot.file_exports.is_empty();
-        Ok(snapshot
-            .services
-            .into_iter()
-            .filter(|s| s.enabled && (s.kind != ServiceKind::Files || legacy_files_configured))
-            .collect())
+        Ok(self.snapshot().await?.enabled_services().cloned().collect())
     }
     pub async fn catalog(&self, peer: EndpointId) -> Result<Catalog, ControlError> {
         let snapshot = self.snapshot().await?;
         if !snapshot.clients.iter().any(|c| c.peer == peer) {
             return Err(ControlError::Forbidden);
         }
-        let legacy_files_configured = !snapshot.file_exports.is_empty();
         let services: Vec<Service> = snapshot
-            .services
-            .into_iter()
-            .filter(|s| {
-                s.enabled
-                    && s.allow.contains(&peer)
-                    && (s.kind != ServiceKind::Files || legacy_files_configured)
-            })
+            .enabled_services()
+            .filter(|s| s.allow.contains(&peer))
+            .cloned()
             .map(|s| Service {
                 id: s.id,
                 incarnation: s.incarnation,

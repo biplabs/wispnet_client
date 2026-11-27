@@ -20,13 +20,14 @@ use tokio::{
     net::TcpStream,
     sync::{Semaphore, watch},
     task::{JoinHandle, JoinSet},
-    time::timeout,
+    time::{Instant, timeout},
 };
 use wispnet_core::{
     config::{ServiceConfig, TransportConfig, validate_services},
     identity::{EndpointId, SecretKey},
     protocol::{self, Status},
 };
+use wispnet_registry::host::{LocalService, Snapshot};
 
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 pub const BACKEND_TIMEOUT: Duration = Duration::from_secs(3);
@@ -34,6 +35,8 @@ pub const IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 /// UI activity indication only; never an authorization/session lease.
 pub const PRESENCE_TIMEOUT: Duration = Duration::from_secs(60);
 pub const MAX_SESSION: Duration = Duration::from_secs(3600);
+const POLICY_INTERVAL: Duration = Duration::from_secs(1);
+const POLICY_MAX_STALENESS: Duration = Duration::from_secs(5);
 const BUFFER: usize = 16 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -227,41 +230,116 @@ enum Services {
         wispnet_registry::host::Authority,
         ShellSessions,
         wispnet_files::FileService,
+        watch::Sender<HostPolicy>,
     ),
 }
 impl Services {
     fn host(authority: wispnet_registry::host::Authority) -> Result<Self, TunnelError> {
         let files = wispnet_files::FileService::new(authority.state_dir().join("files"))
             .map_err(|_| TunnelError::Transport("cannot initialize file service"))?;
-        Ok(Self::Host(authority, ShellSessions::default(), files))
+        Ok(Self::host_with_files(authority, files))
     }
-    async fn load(&self) -> Result<Vec<wispnet_registry::host::LocalService>, Status> {
+    fn host_with_files(
+        authority: wispnet_registry::host::Authority,
+        files: wispnet_files::FileService,
+    ) -> Self {
+        Self::Host(
+            authority,
+            ShellSessions::default(),
+            files,
+            watch::Sender::new(HostPolicy::Starting),
+        )
+    }
+
+    async fn load_service(&self, id: &str) -> Result<(u64, LocalService), Status> {
         match self {
-            Self::Static(services) => Ok(services
-                .iter()
-                .map(|s| wispnet_registry::host::LocalService {
-                    id: s.id.clone(),
-                    incarnation: String::new(),
-                    display_name: s.id.clone(),
-                    kind: wispnet_core::host::ServiceKind::Tcp,
-                    backend: s.backend,
-                    allow: s.allow.clone(),
-                    enabled: true,
-                })
-                .collect()),
-            Self::Host(host, _, _) => host.services().await.map_err(|_| Status::Denied),
+            Self::Static(services) => {
+                let service = services
+                    .iter()
+                    .find(|s| s.id == id)
+                    .ok_or(Status::UnknownService)?;
+                Ok((
+                    0,
+                    LocalService {
+                        id: service.id.clone(),
+                        incarnation: String::new(),
+                        display_name: service.id.clone(),
+                        kind: wispnet_core::host::ServiceKind::Tcp,
+                        backend: service.backend,
+                        allow: service.allow.clone(),
+                        enabled: true,
+                    },
+                ))
+            }
+            Self::Host(host, _, _, _) => {
+                let snapshot = host.snapshot().await.map_err(|_| Status::Denied)?;
+                let service = snapshot
+                    .enabled_services()
+                    .find(|s| s.id == id)
+                    .ok_or(Status::UnknownService)?;
+                Ok((snapshot.revision, service.clone()))
+            }
         }
     }
     async fn pending(&self, peer: EndpointId) -> bool {
         match self {
             Self::Static(_) => false,
-            Self::Host(host, _, _) => host.pairing_pending(peer).await.unwrap_or(false),
+            Self::Host(host, _, _, _) => host.pairing_pending(peer).await.unwrap_or(false),
         }
     }
     async fn approved(&self, peer: EndpointId) -> bool {
         match self {
             Self::Static(services) => services.iter().any(|s| s.allow.contains(&peer)),
-            Self::Host(host, _, _) => host.approved(peer).await,
+            Self::Host(host, _, _, _) => host.approved(peer).await,
+        }
+    }
+}
+
+enum HostPolicy {
+    Starting,
+    Current(Arc<Snapshot>),
+    Unavailable,
+}
+
+async fn watch_host_policy(services: &Services) {
+    let Services::Host(authority, _sessions, _, policy) = services else {
+        std::future::pending::<()>().await;
+        return;
+    };
+    let mut ticks = tokio::time::interval(POLICY_INTERVAL);
+    ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut last_success = Instant::now();
+    loop {
+        ticks.tick().await;
+        match timeout(POLICY_INTERVAL, authority.snapshot()).await {
+            Ok(Ok(snapshot)) => {
+                last_success = Instant::now();
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                {
+                    // Detached PTYs have no stream to receive policy updates.
+                    let scopes: std::collections::HashSet<_> = snapshot
+                        .enabled_services()
+                        .filter(|service| service.kind == wispnet_core::host::ServiceKind::Shell)
+                        .flat_map(|service| {
+                            service
+                                .allow
+                                .iter()
+                                .map(|peer| format!("{}/{peer}", service.incarnation))
+                        })
+                        .collect();
+                    _sessions.retain_scopes(|scope| scopes.contains(scope));
+                }
+                policy.send_replace(HostPolicy::Current(Arc::new(snapshot)));
+            }
+            _ if last_success.elapsed() >= POLICY_MAX_STALENESS
+                && !matches!(*policy.borrow(), HostPolicy::Unavailable) =>
+            {
+                tracing::warn!("Host policy refresh exceeded the staleness limit");
+                policy.send_replace(HostPolicy::Unavailable);
+                #[cfg(not(any(target_os = "android", target_os = "ios")))]
+                _sessions.retain_scopes(|_| false);
+            }
+            _ => {}
         }
     }
 }
@@ -331,7 +409,7 @@ impl TunnelHost {
         Self::bind_services(
             secret,
             config,
-            Services::Host(authority, ShellSessions::default(), files),
+            Services::host_with_files(authority, files),
             enabled,
         )
         .await
@@ -357,7 +435,7 @@ impl TunnelHost {
         enabled: bool,
     ) -> Result<Self, TunnelError> {
         let mut alpns = vec![protocol::ALPN.to_vec()];
-        if matches!(services, Services::Host(_, _, _)) {
+        if matches!(services, Services::Host(_, _, _, _)) {
             alpns.push(wispnet_core::host::ALPN.to_vec());
             alpns.push(wispnet_core::pairing::ALPN.to_vec());
         }
@@ -392,7 +470,7 @@ impl TunnelHost {
         let (stop, receiver) = watch::channel(false);
         let (services_enabled, service_state) = watch::channel(enabled);
         let files = match &services {
-            Services::Host(_, _, files) => Some(files.clone()),
+            Services::Host(_, _, files, _) => Some(files.clone()),
             _ => None,
         };
         if let Some(files) = &files {
@@ -474,7 +552,8 @@ async fn serve(
     let connections = Arc::new(Semaphore::new(config.max_connections));
     let streams = Arc::new(Semaphore::new(config.max_streams));
     let mut tasks = JoinSet::new();
-    let mut shell_policy_tick = tokio::time::interval(Duration::from_secs(1));
+    let policy = watch_host_policy(&services);
+    tokio::pin!(policy);
     let mut files_cleanup_tick = tokio::time::interval(Duration::from_secs(60));
     files_cleanup_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let cleanup_slot = Arc::new(Semaphore::new(1));
@@ -489,12 +568,12 @@ async fn serve(
                 while tasks.join_next().await.is_some() {}
                 #[cfg(not(any(target_os = "android", target_os = "ios")))]
                 if !*services_enabled.borrow()
-                    && let Services::Host(_, sessions, _) = &services {
+                    && let Services::Host(_, sessions, _, _) = &services {
                     sessions.retain_scopes(|_| false);
                 }
             },
             _ = files_cleanup_tick.tick() => {
-                if let Services::Host(_, _, files) = &services
+                if let Services::Host(_, _, files, _) = &services
                     && let Ok(permit) = cleanup_slot.clone().try_acquire_owned()
                 {
                     let files = files.clone();
@@ -506,21 +585,7 @@ async fn serve(
                     });
                 }
             },
-            _ = shell_policy_tick.tick() => {
-                #[cfg(not(any(target_os = "android", target_os = "ios")))]
-                if let Services::Host(_, sessions, _) = &services {
-                    // Disconnected phones no longer have a stream monitor. The
-                    // host still owns their PTYs and rechecks durable authority.
-                    let allowed = timeout(HANDSHAKE_TIMEOUT, services.load()).await;
-                    let mut scopes = std::collections::HashSet::new();
-                    if let Ok(Ok(current)) = allowed {
-                        for service in current.into_iter().filter(|s| s.kind == wispnet_core::host::ServiceKind::Shell) {
-                            for peer in service.allow { scopes.insert(format!("{}/{peer}", service.incarnation)); }
-                        }
-                    }
-                    sessions.retain_scopes(|scope| scopes.contains(scope));
-                }
-            },
+            _ = &mut policy => break,
             Some(_) = tasks.join_next(), if !tasks.is_empty() => {},
             incoming = endpoint.accept() => {
                 let Some(incoming) = incoming else { break };
@@ -550,7 +615,7 @@ async fn serve(
                         let Ok(Ok((send, recv))) = timeout(HANDSHAKE_TIMEOUT, connection.accept_bi()).await else { return };
                         let Ok(_stream_permit) = streams.try_acquire_owned() else { return };
                         let _stream_guard = CountGuard::new(counts.streams.clone());
-                        if let Services::Host(authority, _, _) = services {
+                        if let Services::Host(authority, _, _, _) = services {
                             crate::pairing::serve_stream(send, recv, peer, authority).await;
                         }
                         return;
@@ -613,7 +678,7 @@ async fn serve_connection(
                     let _permit = permit;
                     let _guard = guard;
                     if connection_control {
-                        if let Services::Host(host, _, _)=services {crate::control::serve_stream(send,recv,peer,host,counts,diagnostics,observed_connection).await;}
+                        if let Services::Host(host, _, _, _)=services {crate::control::serve_stream(send,recv,peer,host,counts,diagnostics,observed_connection).await;}
                     } else {
                         serve_stream(send, recv, peer, &services, &counts).await;
                     }
@@ -662,11 +727,7 @@ async fn serve_stream(
     let opened = async {
         let frame = read_frame(&mut recv).await?;
         let (id, incarnation) = protocol::decode_bound_request(&frame)?;
-        let services = services.load().await?;
-        let service = services
-            .iter()
-            .find(|service| service.id == id)
-            .ok_or(Status::UnknownService)?;
+        let (policy_revision, service) = services.load_service(id).await?;
         if (!service.incarnation.is_empty()
             && incarnation.as_deref() != Some(service.incarnation.as_str()))
             || (service.incarnation.is_empty() && incarnation.is_some())
@@ -700,13 +761,14 @@ async fn serve_stream(
         };
         Ok((
             backend,
-            id.to_owned(),
+            service.id,
             service.backend,
-            service.incarnation.clone(),
+            service.incarnation,
             service.kind,
+            policy_revision,
         ))
     };
-    let (backend, service_id, binding, incarnation, kind) =
+    let (backend, service_id, binding, incarnation, kind, policy_revision) =
         match timeout(HANDSHAKE_TIMEOUT, opened).await {
             Ok(Ok(backend)) => backend,
             outcome => {
@@ -730,35 +792,45 @@ async fn serve_stream(
         return;
     }
     let mut tunnel = ServiceStream::new(send, recv);
-    // Every built-in stream has the same durable grant/incarnation guard
-    // as TCP services. Revocation cancels the attached stream, not the daemon.
     let policy = async {
-        if matches!(services, Services::Static(_)) {
+        let Services::Host(_, _, _, policy) = services else {
             std::future::pending::<()>().await;
-        }
-        loop {
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let allowed = timeout(std::time::Duration::from_secs(1), services.load()).await;
-            if !matches!(allowed, Ok(Ok(ref current)) if current.iter().any(|s| s.id == service_id && s.incarnation == incarnation && s.kind == kind && s.backend == binding && s.allow.contains(&peer)))
-            {
-                break;
-            }
-        }
+            return;
+        };
+        let _ = policy
+            .subscribe()
+            .wait_for(|policy| match policy {
+                HostPolicy::Starting => false,
+                HostPolicy::Unavailable => true,
+                // A new stream's admission read can be newer than the cached policy.
+                HostPolicy::Current(snapshot) => {
+                    snapshot.revision >= policy_revision
+                        && !snapshot.enabled_services().any(|service| {
+                            service.id == service_id
+                                && service.incarnation == incarnation
+                                && service.kind == kind
+                                && service.backend == binding
+                                && service.allow.contains(&peer)
+                        })
+                }
+            })
+            .await;
     };
     if kind == wispnet_core::host::ServiceKind::Shell {
         #[cfg(not(any(target_os = "android", target_os = "ios")))]
-        if let Services::Host(_, sessions, _) = services {
+        if let Services::Host(_, sessions, _, _) = services {
             let scope = format!("{incarnation}/{peer}");
             tokio::select! {
-                _ = timeout(MAX_SESSION, sessions.serve(tunnel, scope.clone())) => {},
+                biased;
                 _ = policy => { sessions.close_scope(&scope); },
+                _ = timeout(MAX_SESSION, sessions.serve(tunnel, scope.clone())) => {},
             }
         }
         counts.record_activity(peer);
         return;
     }
     if kind == wispnet_core::host::ServiceKind::FileShare {
-        if let Services::Host(authority, _, files) = services {
+        if let Services::Host(authority, _, files, _) = services {
             // Read the selected root and its grant from one current snapshot.
             // A concurrent root/grant edit must not bind the old handshake to
             // new contents before the periodic active-stream guard runs.
@@ -790,7 +862,7 @@ async fn serve_stream(
         return;
     }
     if kind == wispnet_core::host::ServiceKind::FileInbox {
-        if let Services::Host(authority, _, files) = services {
+        if let Services::Host(authority, _, files, _) = services {
             let mut snapshot = match authority.snapshot().await {
                 Ok(snapshot) => snapshot,
                 _ => return,
@@ -820,7 +892,7 @@ async fn serve_stream(
         return;
     }
     if kind == wispnet_core::host::ServiceKind::Files {
-        if let Services::Host(authority, _, files) = services {
+        if let Services::Host(authority, _, files, _) = services {
             let exports = match authority.file_exports().await {
                 Ok(exports) => exports,
                 Err(_) => return,

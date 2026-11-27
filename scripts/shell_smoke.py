@@ -5,6 +5,7 @@ Uses private temporary identities, policies, HOME directories, and loopback
 discovery hints. No installed node, user grants, or shell profiles are touched.
 """
 
+from contextlib import closing
 import errno
 import fcntl
 import http.client
@@ -17,6 +18,7 @@ import select
 import shlex
 import signal
 import socket
+import sqlite3
 import struct
 import subprocess
 import tempfile
@@ -204,6 +206,16 @@ class ShellSmoke(unittest.TestCase):
         terminal.expect("Ctrl+] detaches")
         return terminal
 
+    def wait_for_shell_exit(self, pid):
+        deadline = time.monotonic() + 5
+        while True:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            self.assertLess(time.monotonic(), deadline, "Revoked detached shell survived")
+            time.sleep(0.03)
+
     def test_bulk_input_and_output_make_progress_together(self):
         config, _, _, _ = self.host("shell-bulk")
         # More than the host's 1 MiB history budget: draining stdin before
@@ -303,6 +315,15 @@ class ShellSmoke(unittest.TestCase):
         active = self.terminal(client, target_id, incarnation, session="revoked")
         active.send("printf '%s%s\\n' WISP_ ACTIVE\r")
         active.expect("WISP_ACTIVE")
+        # Hold the authority DB past several watcher ticks and its SQLite busy timeout.
+        with closing(sqlite3.connect(self.root / "shell-target" / "host.sqlite3")) as store:
+            store.execute("BEGIN EXCLUSIVE")
+            time.sleep(3.5)
+            active.send("printf '%s%s\\n' WISP_ DURING_STORE_LOCK\r")
+            active.expect("WISP_DURING_STORE_LOCK")
+            os.kill(pid, 0)
+            store.rollback()
+
         before = target_api.request(op="status")["host"]
         self.mcp(target_api, "wispnet_revoke_service_access",
                  expected_revision=before["revision"], service="shell", peer=client_id)
@@ -315,20 +336,20 @@ class ShellSmoke(unittest.TestCase):
             current = next(s for s in after["services"] if s["id"] == service["id"])
             self.assertEqual(current, dict(service, allow=[]) if service["id"] == "shell" else service)
         self.assertEqual([s["id"] for s in api.request(op="catalog", host=target_id)["services"]], ["other"])
-        deadline = time.monotonic() + 5
-        while True:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
-            self.assertLess(time.monotonic(), deadline, "Revoked detached shell survived")
-            time.sleep(0.03)
+        self.wait_for_shell_exit(pid)
 
         self.mutate(target_api, op="grant_service", service="shell", peer=client_id)
         fresh = self.terminal(client, target_id, incarnation, session="detached")
-        fresh.send("printf 'WISP_REVOKED_STATE_%s\\n' \"${WISP_SMOKE_REVOKED-unset}\"; exit 0\r")
+        fresh.send("printf '%s\\n' \"$$\" > " + shlex.quote(str(detached_pid))
+                   + "; printf 'WISP_REVOKED_STATE_%s\\n' \"${WISP_SMOKE_REVOKED-unset}\"\r")
         fresh.expect("WISP_REVOKED_STATE_unset")
+        fresh.send(b"\x1d")
         fresh.wait(0)
+
+        # A detached PTY must be swept even when no attached Shell stream can close its scope.
+        self.mutate(target_api, op="revoke_service", service="shell", peer=client_id)
+        self.wait_for_shell_exit(int(detached_pid.read_text().strip()))
+        self.mutate(target_api, op="grant_service", service="shell", peer=client_id)
 
         # Forgetting a host locally must also close an already-open outgoing
         # terminal, without relying on the remote owner learning the removal.
