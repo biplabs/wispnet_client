@@ -1,8 +1,8 @@
 cask "wispnet" do
-  version "68.d44fe2a"
-  sha256 "01b7e38acbb06188c17031a596b9050509d6c6b383d81dbb32958fc376df215e"
+  version "69.a7c3487"
+  sha256 "a878d8ca8809f31f14800953911839a4d272b2db82195e5a3448ee9c7e63cb46"
 
-  url "https://github.com/biplabs/wispnet_client/releases/download/development-68-d44fe2a/wispnet-macos-aarch64.dmg"
+  url "https://github.com/biplabs/wispnet_client/releases/download/development-69-a7c3487/wispnet-macos-aarch64.dmg"
   name "Wispnet"
   desc "Share and access services across your devices"
   homepage "https://github.com/biplabs/wispnet_client"
