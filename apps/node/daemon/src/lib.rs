@@ -5,13 +5,17 @@ use iroh::Watcher;
 use serde_json::{Value, json};
 use std::{
     future::Future,
+    io,
     os::unix::fs::{FileTypeExt, PermissionsExt},
     path::PathBuf,
+    pin::pin,
     sync::Arc,
+    time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
-    net::{UnixListener, UnixStream},
+    net::{UnixListener, UnixStream, unix::SocketAddr},
+    sync::{OwnedSemaphorePermit, Semaphore},
     task::JoinSet,
 };
 pub use wispnet_client::access_settings::{save_enabled, saved_enabled};
@@ -281,9 +285,77 @@ fn request_timeout(value: &Value) -> std::time::Duration {
     })
 }
 
-async fn serve(mut stream: UnixStream, state: Arc<State>) {
+const LOCAL_REQUEST_LIMIT: usize = 32;
+const LOCAL_SHELL_LIMIT: usize = 32;
+
+struct LocalRequests {
+    // Track both classes for shutdown. Only their own permits limit admission.
+    tasks: JoinSet<()>,
+    requests: Arc<Semaphore>,
+    shells: Arc<Semaphore>,
+}
+
+impl LocalRequests {
+    fn new() -> Self {
+        Self {
+            tasks: JoinSet::new(),
+            requests: Arc::new(Semaphore::new(LOCAL_REQUEST_LIMIT)),
+            shells: Arc::new(Semaphore::new(LOCAL_SHELL_LIMIT)),
+        }
+    }
+
+    fn spawn<R, S>(
+        &mut self,
+        stream: UnixStream,
+        request: impl FnOnce(Value) -> R + Send + 'static,
+        shell: impl FnOnce(UnixStream, Value) -> S + Send + 'static,
+    ) where
+        R: Future<Output = Result<Value, String>> + Send + 'static,
+        S: Future<Output = ()> + Send + 'static,
+    {
+        if let Ok(request_slot) = self.requests.clone().try_acquire_owned() {
+            self.tasks.spawn(serve(
+                stream,
+                request_slot,
+                self.shells.clone(),
+                request,
+                shell,
+            ));
+        }
+    }
+}
+
+async fn accept_local<F>(accept: impl Fn() -> F) -> io::Result<(UnixStream, SocketAddr)>
+where
+    F: Future<Output = io::Result<(UnixStream, SocketAddr)>>,
+{
+    loop {
+        let error = match accept().await {
+            Ok(connection) => return Ok(connection),
+            Err(error) => error,
+        };
+        let delay = match error.raw_os_error() {
+            Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS | libc::ENOMEM) => 100,
+            Some(libc::EINTR | libc::EAGAIN | libc::ECONNABORTED | libc::EPROTO) => 10,
+            _ => return Err(error),
+        };
+        tracing::warn!(%error, "Local API accept failed, retrying");
+        tokio::time::sleep(Duration::from_millis(delay)).await;
+    }
+}
+
+async fn serve<R, S>(
+    mut stream: UnixStream,
+    request_slot: OwnedSemaphorePermit,
+    shells: Arc<Semaphore>,
+    request: impl FnOnce(Value) -> R,
+    shell: impl FnOnce(UnixStream, Value) -> S,
+) where
+    R: Future<Output = Result<Value, String>>,
+    S: Future<Output = ()>,
+{
     let started = std::time::Instant::now();
-    let request = tokio::time::timeout(std::time::Duration::from_secs(25), async {
+    let parsed = tokio::time::timeout(std::time::Duration::from_secs(25), async {
         if stream.peer_cred()?.uid() != unsafe { libc::geteuid() } {
             return Err(std::io::Error::other("Wrong local user"));
         }
@@ -306,14 +378,18 @@ async fn serve(mut stream: UnixStream, state: Arc<State>) {
         }
     })
     .await;
-    let result = match request {
-        Ok(Ok(value)) if value["op"] == "shell_stream" => {
-            serve_shell_stream(stream, state, value).await;
-            return;
-        }
+    let result = match parsed {
+        Ok(Ok(value)) if value["op"] == "shell_stream" => match shells.try_acquire_owned() {
+            Ok(_shell_slot) => {
+                drop(request_slot);
+                shell(stream, value).await;
+                return;
+            }
+            Err(_) => Err("Local shell session limit reached".into()),
+        },
         Ok(Ok(value)) => {
             let remaining = request_timeout(&value).saturating_sub(started.elapsed());
-            tokio::time::timeout(remaining, state.request(value))
+            tokio::time::timeout(remaining, request(value))
                 .await
                 .unwrap_or_else(|_| Err("Local operation timed out".into()))
         }
@@ -466,31 +542,54 @@ pub async fn run(
     });
     let mut firewall_reporter = firewall::Reporter::new();
     let mut firewall_tick = tokio::time::interval(std::time::Duration::from_secs(1));
-    let mut tasks = JoinSet::new();
+    let mut local = LocalRequests::new();
+    let accept = || listener.accept();
+    // Keep any retry delay across firewall ticks and task completions.
+    let mut accepted = pin!(accept_local(accept));
     tokio::pin!(shutdown);
     tracing::info!(component="agent",event="started",networking=true,mode="independent_host",endpoint_id=%host.endpoint().id(),bind_addr=%host.endpoint().bound_sockets().first().map(ToString::to_string).unwrap_or_else(||"relay-only".into()));
-    loop {
-        tokio::select! {_= &mut shutdown=>break,
-        _ = firewall_tick.tick() => {
-            if let Some(reporter) = &mut firewall_reporter
-                && reporter.update(host.endpoint()).is_err() {
-                tracing::warn!("Cannot publish local firewall socket report");
+    let outcome = loop {
+        tokio::select! {
+            _ = &mut shutdown => break Ok(()),
+            _ = firewall_tick.tick() => {
+                if let Some(reporter) = &mut firewall_reporter
+                    && reporter.update(host.endpoint()).is_err()
+                {
+                    tracing::warn!("Cannot publish local firewall socket report");
+                }
             }
-        },Some(_)=tasks.join_next(),if !tasks.is_empty()=>{},accepted=listener.accept()=>{let(stream,_)=accepted?;if tasks.len()<32{tasks.spawn(serve(stream,state.clone()));}}}
-    }
-    tasks.abort_all();
-    while tasks.join_next().await.is_some() {}
+            _ = local.tasks.join_next(), if !local.tasks.is_empty() => {
+                while local.tasks.try_join_next().is_some() {}
+            },
+            result = &mut accepted => {
+                let stream = match result {
+                    Ok((stream, _)) => stream,
+                    Err(error) => break Err(error),
+                };
+                accepted.set(accept_local(accept));
+                let control_state = state.clone();
+                let shell_state = state.clone();
+                local.spawn(
+                    stream,
+                    move |value| async move { control_state.request(value).await },
+                    move |stream, value| serve_shell_stream(stream, shell_state, value),
+                );
+            }
+        }
+    };
+    local.tasks.shutdown().await;
     client.publications.stop().await;
     client.gateway.stop().await;
     drop(state);
     drop(client);
     host.shutdown().await;
     tracing::info!(component = "agent", event = "stopped");
+    outcome?;
     Ok(())
 }
 
 #[cfg(test)]
-mod request_budget_tests {
+mod tests {
     use super::*;
 
     #[test]
@@ -505,5 +604,102 @@ mod request_budget_tests {
                 std::time::Duration::from_secs(25),
             );
         }
+    }
+
+    #[tokio::test]
+    async fn local_accept_recovers_and_propagates_permanent_errors() {
+        use std::{cell::Cell, future::ready};
+
+        let attempts = Cell::new(0);
+        let started = tokio::time::Instant::now();
+        let (mut client, server) = UnixStream::pair().unwrap();
+        let next = Cell::new(Some(server));
+        let (mut server, _) = tokio::time::timeout(
+            Duration::from_secs(5),
+            accept_local(|| {
+                let attempt = attempts.get();
+                attempts.set(attempt + 1);
+                ready(match attempt {
+                    0 => Err(io::Error::from_raw_os_error(libc::ECONNABORTED)),
+                    1 => Err(io::Error::from_raw_os_error(libc::EMFILE)),
+                    2 => {
+                        let stream = next.take().unwrap();
+                        let address = stream.peer_addr().unwrap();
+                        Ok((stream, address))
+                    }
+                    _ => panic!("unexpected accept attempt"),
+                })
+            }),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(attempts.get(), 3);
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        client.write_all(b"x").await.unwrap();
+        assert_eq!(server.read_u8().await.unwrap(), b'x');
+
+        let error = accept_local(|| ready(Err(io::Error::from_raw_os_error(libc::EBADF))))
+            .await
+            .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EBADF));
+    }
+
+    async fn local_request(local: &mut LocalRequests, op: &str) -> (UnixStream, Value) {
+        let (mut client, server) = UnixStream::pair().unwrap();
+        local.spawn(
+            server,
+            |value| async move { Ok(value) },
+            |mut stream, _| async move {
+                stream.write_all(b"{\"ok\":true}\n").await.unwrap();
+                // Keep the session open until its client disconnects.
+                let _ = stream.read_u8().await;
+            },
+        );
+        client
+            .write_all(format!("{}\n", json!({"op": op})).as_bytes())
+            .await
+            .unwrap();
+        let mut response = String::new();
+        use tokio::io::AsyncBufReadExt;
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            tokio::io::BufReader::new(&mut client).read_line(&mut response),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        (client, serde_json::from_str(&response).unwrap())
+    }
+
+    #[tokio::test]
+    async fn shell_capacity_leaves_local_management_available() {
+        let mut local = LocalRequests::new();
+        let mut clients = Vec::new();
+        for _ in 0..LOCAL_SHELL_LIMIT {
+            let (client, response) = local_request(&mut local, "shell_stream").await;
+            assert_eq!(response["ok"], true);
+            clients.push(client);
+        }
+        let (_, response) = local_request(&mut local, "shell_stream").await;
+        assert_eq!(response["error"], "Local shell session limit reached");
+        for op in ["status", "mutate", "stop"] {
+            let (_, response) = local_request(&mut local, op).await;
+            assert_eq!(response, json!({"ok": true, "result": {"op": op}}));
+        }
+
+        drop(clients.pop().unwrap());
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // Completed management tasks may still be queued ahead of the shell.
+            while local.shells.available_permits() == 0 {
+                local.tasks.join_next().await.unwrap().unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        let (_replacement, response) = local_request(&mut local, "shell_stream").await;
+        assert_eq!(response["ok"], true);
+        local.tasks.shutdown().await;
+        assert_eq!(local.shells.available_permits(), LOCAL_SHELL_LIMIT);
     }
 }
